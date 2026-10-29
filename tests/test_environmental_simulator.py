@@ -41,7 +41,7 @@ class TestSimulatorInitialization:
     def test_initialization_parameters_present(self, simulator):
         """All 5 mandatory parameters must be initialized."""
         keys = simulator.get_parameter_keys()
-        expected = ["temperature", "humidity", "dust", "noise", "gas"]
+        expected = ["temperature", "humidity", "noise", "gas"]
         assert sorted(keys) == sorted(expected)
 
     def test_initial_values_match_documented_defaults(self, simulator):
@@ -49,7 +49,6 @@ class TestSimulatorInitialization:
         readings = simulator.get_all_readings()
         assert readings["temperature"].value == 24.0
         assert readings["humidity"].value == 45.0
-        assert readings["dust"].value == 28.0
         assert readings["noise"].value == 65.0
         assert readings["gas"].value == 8.0
 
@@ -68,7 +67,6 @@ class TestSimulatorInitialization:
         readings = simulator.get_all_readings()
         assert readings["temperature"].unit == "°C"
         assert readings["humidity"].unit == "%"
-        assert readings["dust"].unit == "µg/m³"
         assert readings["noise"].unit == "dB"
         assert readings["gas"].unit == "ppm"
 
@@ -98,13 +96,11 @@ class TestManualReadingUpdates:
     def test_update_preserves_other_parameters(self, simulator):
         """Updating one slider must not reset or affect any other readings."""
         simulator.set_reading("temperature", 32.0)
-        simulator.set_reading("dust", 120.0)
 
         # Update noise
         simulator.set_reading("noise", 80.0)
 
         assert simulator.get_reading("temperature").value == 32.0
-        assert simulator.get_reading("dust").value == 120.0
         assert simulator.get_reading("noise").value == 80.0
         assert simulator.get_reading("humidity").value == 45.0  # untouched default
         assert simulator.get_reading("gas").value == 8.0  # untouched default
@@ -114,7 +110,6 @@ class TestManualReadingUpdates:
         new_values = {
             "temperature": 28.0,
             "humidity": 50.0,
-            "dust": 40.0,
             "noise": 68.0,
             "gas": 15.0,
         }
@@ -158,14 +153,6 @@ class TestThresholdEvaluations:
         assert simulator.evaluate_parameter_status("humidity", 15.0)[0] == HazardStatus.DANGER
         assert simulator.evaluate_parameter_status("humidity", 85.0)[0] == HazardStatus.DANGER
 
-    def test_dust_upper_thresholds(self, simulator):
-        """Dust (PM10): Safe <= 50, Warning (50, 150], Danger > 150."""
-        assert simulator.evaluate_parameter_status("dust", 20.0)[0] == HazardStatus.SAFE
-        assert simulator.evaluate_parameter_status("dust", 50.0)[0] == HazardStatus.SAFE
-        assert simulator.evaluate_parameter_status("dust", 95.0)[0] == HazardStatus.WARNING
-        assert simulator.evaluate_parameter_status("dust", 150.0)[0] == HazardStatus.WARNING
-        assert simulator.evaluate_parameter_status("dust", 210.0)[0] == HazardStatus.DANGER
-
     def test_noise_upper_thresholds(self, simulator):
         """Noise: Safe <= 70 dB, Warning (70, 85] dB, Danger > 85 dB."""
         assert simulator.evaluate_parameter_status("noise", 60.0)[0] == HazardStatus.SAFE
@@ -205,16 +192,16 @@ class TestOverallSiteHazardStatus:
     def test_overall_status_multiple_warnings(self, simulator):
         """Multiple WARNINGs result in overall WARNING listing all active warning hazards."""
         simulator.set_reading("noise", 75.0)  # Warning
-        simulator.set_reading("dust", 110.0)  # Warning
+        simulator.set_reading("temperature", 35.0)  # Warning
         status, msg, hazards = simulator.get_overall_site_status()
         assert status == HazardStatus.WARNING
         assert "Noise Level" in hazards
-        assert "Dust Concentration" in hazards
+        assert "Temperature" in hazards
 
     def test_overall_status_danger_takes_precedence(self, simulator):
         """A single DANGER must override any number of WARNINGs to yield DANGER (RED)."""
         simulator.set_reading("noise", 75.0)  # Warning
-        simulator.set_reading("dust", 110.0)  # Warning
+        simulator.set_reading("temperature", 35.0)  # Warning
         simulator.set_reading("gas", 65.0)  # DANGER
 
         status, msg, hazards = simulator.get_overall_site_status()
@@ -336,15 +323,15 @@ class TestAutomaticSimulation:
         assert "is_paused" in state
         assert "overall_status" in state
         assert "readings" in state
-        assert len(state["readings"]) == 5
+        assert len(state["readings"]) == 4
 
     def test_simulation_works_without_internet_or_keys(self, simulator):
         """Simulation operates completely self-contained with zero API keys or external services."""
         # Step simulation several times
         for _ in range(5):
             readings = simulator.step_simulation()
-            assert len(readings) == 5
-            for k in ["temperature", "humidity", "dust", "noise", "gas"]:
+            assert len(readings) == 4
+            for k in ["temperature", "humidity", "noise", "gas"]:
                 assert k in readings
                 assert isinstance(readings[k].value, float)
 
@@ -370,7 +357,6 @@ class TestResetFunctionality:
         assert res["noise"].value == 65.0
         assert res["temperature"].value == 24.0
         assert res["humidity"].value == 45.0
-        assert res["dust"].value == 28.0
 
         assert simulator.is_running is False
         assert simulator.is_paused is False

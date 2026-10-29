@@ -40,10 +40,10 @@ def test_gas_safety_integration_full_pipeline():
     json_report = simulator.export_json_report_str()
     assert "hazard_events" in json_report
 
-def test_five_parameters_present():
+def test_monitored_parameters_present():
     simulator = EnvironmentalSimulator()
     readings = simulator.get_all_readings()
-    required_keys = {"temperature", "humidity", "dust", "noise", "gas"}
+    required_keys = {"temperature", "humidity", "noise", "gas"}
     assert required_keys.issubset(set(readings.keys()))
 
 def test_gas_leak_danger_thresholds():

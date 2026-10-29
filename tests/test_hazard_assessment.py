@@ -97,15 +97,6 @@ class TestHazardClassifications:
         ass_dang_high = HazardAssessmentEngine.assess_parameter("humidity", 85.0, meta)
         assert ass_dang_high.status == HazardStatus.DANGER
 
-    def test_dust_classifications(self, params_meta):
-        meta = params_meta["dust"]
-        # Safe (GREEN)
-        assert HazardAssessmentEngine.assess_parameter("dust", 25.0, meta).status == HazardStatus.SAFE
-        # Warning (ORANGE)
-        assert HazardAssessmentEngine.assess_parameter("dust", 80.0, meta).status == HazardStatus.WARNING
-        # Danger (RED)
-        assert HazardAssessmentEngine.assess_parameter("dust", 200.0, meta).status == HazardStatus.DANGER
-
     def test_noise_classifications(self, params_meta):
         meta = params_meta["noise"]
         # Safe (GREEN)
@@ -147,15 +138,6 @@ class TestProtectiveActionRecommendations:
         assert "cool" in rec_text_d
         assert "hydration" in rec_text_d or "water" in rec_text_d
         assert "emergency" in rec_text_d or "procedures" in rec_text_d
-
-    def test_dust_recommendations(self, params_meta):
-        """For excessive dust, must recommend controlling dust source, suitable ventilation, and respiratory protection."""
-        meta = params_meta["dust"]
-        ass = HazardAssessmentEngine.assess_parameter("dust", 180.0, meta)
-        rec_text = " ".join(ass.recommended_actions).lower()
-        assert "dust source" in rec_text or "suppression" in rec_text
-        assert "ventilation" in rec_text
-        assert "respiratory-protection" in rec_text or "respirator" in rec_text
 
     def test_noise_recommendations(self, params_meta):
         """For excessive noise, must recommend reducing exposure and appropriate hearing protection."""
@@ -201,7 +183,6 @@ class TestSiteAssessmentAndSeverityOrdering:
         readings = {
             "temperature": 24.0,
             "humidity": 45.0,
-            "dust": 28.0,
             "noise": 65.0,
             "gas": 8.0,
         }
@@ -209,14 +190,13 @@ class TestSiteAssessmentAndSeverityOrdering:
         assert site_ass.overall_status == HazardStatus.SAFE
         assert site_ass.has_hazards is False
         assert len(site_ass.active_hazards) == 0
-        assert len(site_ass.safe_parameters) == 5
+        assert len(site_ass.safe_parameters) == 4
 
     def test_single_warning_site_status(self, params_meta):
         """Single WARNING results in overall WARNING with that parameter active."""
         readings = {
-            "temperature": 24.0,
+            "temperature": 35.0,  # Warning
             "humidity": 45.0,
-            "dust": 100.0,  # Warning
             "noise": 65.0,
             "gas": 8.0,
         }
@@ -225,41 +205,38 @@ class TestSiteAssessmentAndSeverityOrdering:
         assert site_ass.warning_count == 1
         assert site_ass.danger_count == 0
         assert len(site_ass.active_hazards) == 1
-        assert site_ass.active_hazards[0].parameter_key == "dust"
+        assert site_ass.active_hazards[0].parameter_key == "temperature"
 
     def test_danger_overrides_warning(self, params_meta):
         """DANGER overrides WARNING, setting overall status to DANGER (RED)."""
         readings = {
             "temperature": 35.0,  # Warning
             "humidity": 45.0,
-            "dust": 90.0,   # Warning
             "noise": 95.0,  # DANGER
             "gas": 8.0,
         }
         site_ass = HazardAssessmentEngine.assess_site(readings, params_meta)
         assert site_ass.overall_status == HazardStatus.DANGER
         assert site_ass.danger_count == 1
-        assert site_ass.warning_count == 2
+        assert site_ass.warning_count == 1
 
     def test_multiple_hazards_severity_ordering(self, params_meta):
         """Multiple simultaneous hazards must be sorted strictly by severity (DANGER first, then WARNING)."""
         readings = {
             "temperature": 35.0,  # WARNING (severity 1)
             "humidity": 85.0,     # DANGER (severity 2)
-            "dust": 120.0,        # WARNING (severity 1)
             "noise": 100.0,       # DANGER (severity 2)
             "gas": 8.0,           # SAFE (severity 0)
         }
         site_ass = HazardAssessmentEngine.assess_site(readings, params_meta)
-        assert len(site_ass.active_hazards) == 4
+        assert len(site_ass.active_hazards) == 3
 
         # DANGER hazards must appear before WARNING hazards
         severities = [h.severity for h in site_ass.active_hazards]
-        assert severities == [2, 2, 1, 1]
+        assert severities == [2, 2, 1]
         assert site_ass.active_hazards[0].status == HazardStatus.DANGER
         assert site_ass.active_hazards[1].status == HazardStatus.DANGER
         assert site_ass.active_hazards[2].status == HazardStatus.WARNING
-        assert site_ass.active_hazards[3].status == HazardStatus.WARNING
 
 
 # =============================================================================
@@ -283,13 +260,6 @@ class TestBoundaryValues:
         # Just past warning into danger
         assert HazardAssessmentEngine.assess_parameter("temperature", 4.99, meta).status == HazardStatus.DANGER
         assert HazardAssessmentEngine.assess_parameter("temperature", 38.01, meta).status == HazardStatus.DANGER
-
-    def test_dust_exact_boundaries(self, params_meta):
-        meta = params_meta["dust"]
-        assert HazardAssessmentEngine.assess_parameter("dust", 50.0, meta).status == HazardStatus.SAFE
-        assert HazardAssessmentEngine.assess_parameter("dust", 50.01, meta).status == HazardStatus.WARNING
-        assert HazardAssessmentEngine.assess_parameter("dust", 150.0, meta).status == HazardStatus.WARNING
-        assert HazardAssessmentEngine.assess_parameter("dust", 150.01, meta).status == HazardStatus.DANGER
 
     def test_noise_exact_boundaries(self, params_meta):
         meta = params_meta["noise"]
@@ -318,7 +288,7 @@ class TestInvalidAndMissingReadings:
 
     def test_nan_and_inf_handled_safely(self, params_meta):
         """NaN and infinite values handled safely."""
-        ass_nan = HazardAssessmentEngine.assess_parameter("dust", float("nan"), params_meta["dust"])
+        ass_nan = HazardAssessmentEngine.assess_parameter("temperature", float("nan"), params_meta["temperature"])
         assert ass_nan.status == HazardStatus.WARNING
 
         ass_inf = HazardAssessmentEngine.assess_parameter("noise", float("inf"), params_meta["noise"])
@@ -328,14 +298,14 @@ class TestInvalidAndMissingReadings:
         """Missing parameters in readings dictionary handled safely."""
         partial_readings = {"temperature": 24.0}  # 4 parameters missing
         site_ass = HazardAssessmentEngine.assess_site(partial_readings, params_meta)
-        assert len(site_ass.all_assessments) == 5
+        assert len(site_ass.all_assessments) == 4
         # The missing parameters should evaluate with warning
         assert site_ass.all_assessments["gas"].status == HazardStatus.WARNING
 
     def test_empty_readings_dict_handled_safely(self, params_meta):
         """Empty readings dictionary evaluates safely."""
         site_ass = HazardAssessmentEngine.assess_site({}, params_meta)
-        assert len(site_ass.all_assessments) == 5
+        assert len(site_ass.all_assessments) == 4
         assert site_ass.overall_status == HazardStatus.WARNING
 
 
@@ -361,8 +331,8 @@ class TestSimulatorIntegration:
 
     def test_simulator_assess_parameter_method(self, simulator):
         """Simulator assess_parameter produces valid HazardAssessment."""
-        simulator.set_reading("dust", 160.0)
-        ass = simulator.assess_parameter("dust")
+        simulator.set_reading("gas", 70.0)
+        ass = simulator.assess_parameter("gas")
         assert isinstance(ass, HazardAssessment)
         assert ass.status == HazardStatus.DANGER
-        assert "respiratory" in " ".join(ass.recommended_actions).lower()
+        assert "evacuation" in " ".join(ass.recommended_actions).lower() or "emergency" in " ".join(ass.recommended_actions).lower()

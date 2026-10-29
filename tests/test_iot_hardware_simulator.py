@@ -2,7 +2,7 @@
 """
 Tests for simulator.py (IoTHardwareSimulator and read_sensors).
 Verifies realistic sensor reading generation, threshold evaluation, scenario overrides,
-and node telemetry structure.
+and node telemetry structure (Phase 4: 4 parameters, 3 hardware nodes).
 """
 
 import pytest
@@ -10,17 +10,17 @@ from simulator import IoTHardwareSimulator, SCENARIOS, SENSOR_NODES, get_simulat
 
 
 def test_sensor_nodes_definition():
-    """Verify all 4 required hardware nodes exist."""
-    assert len(SENSOR_NODES) == 4
+    """Verify all 3 required physical hardware nodes exist."""
+    assert len(SENSOR_NODES) == 3
     node_ids = [n["node"] for n in SENSOR_NODES]
     assert "GAS-01" in node_ids
     assert "DHT-02" in node_ids
-    assert "PM-03" in node_ids
     assert "MIC-04" in node_ids
+    assert "PM-03" not in node_ids
 
 
 def test_read_sensors_structure():
-    """Verify read_sensors returns the required schema."""
+    """Verify read_sensors returns the required schema for 4 monitored parameters."""
     telemetry = read_sensors()
     assert "readings" in telemetry
     assert "site_status" in telemetry
@@ -31,7 +31,8 @@ def test_read_sensors_structure():
     assert "nodes" in telemetry
 
     readings = telemetry["readings"]
-    for param in ["temperature", "humidity", "dust", "noise", "gas"]:
+    assert "dust" not in readings
+    for param in ["temperature", "humidity", "noise", "gas"]:
         assert param in readings
         r = readings[param]
         assert "value" in r
@@ -61,11 +62,10 @@ def test_scenario_presets():
     assert tel["danger_count"] >= 1
     assert tel["readings"]["gas"]["status"] == "DANGER"
 
-    # Dust & Noise
-    sim.set_override(SCENARIOS["Dust & Noise"])
+    # Acoustic Noise Stress
+    sim.set_override(SCENARIOS["Acoustic Noise Stress"])
     tel = sim.read_sensors()
     assert tel["site_status"] == "warning"
-    assert tel["readings"]["dust"]["status"] == "WARNING"
     assert tel["readings"]["noise"]["status"] == "WARNING"
 
     # Clear override

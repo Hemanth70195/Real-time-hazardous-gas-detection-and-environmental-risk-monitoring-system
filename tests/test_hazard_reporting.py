@@ -61,7 +61,6 @@ class TestHistoricalReadingCreation:
         readings = {
             "temperature": 25.5,
             "humidity": 50.0,
-            "dust": 30.0,
             "noise": 65.0,
             "gas": 8.0,
         }
@@ -74,7 +73,6 @@ class TestHistoricalReadingCreation:
         row = df.iloc[0]
         assert row["temperature"] == 25.5
         assert row["humidity"] == 50.0
-        assert row["dust"] == 30.0
         assert row["noise"] == 65.0
         assert row["gas"] == 8.0
         assert row["Mode"] == "manual"
@@ -98,7 +96,6 @@ class TestHistoricalReadingCreation:
         readings = {
             "temperature": 38.0,  # WARNING
             "humidity": 45.0,     # SAFE
-            "dust": 25.0,         # SAFE
             "noise": 70.0,        # SAFE
             "gas": 75.0,          # DANGER
         }
@@ -121,7 +118,7 @@ class TestHistoricalReadingCreation:
 class TestDuplicatePrevention:
     def test_no_duplicate_records_on_repeated_ui_refreshes(self, tracker):
         """Identical readings and tick on static UI reruns do not insert duplicate rows."""
-        readings = {"temperature": 23.0, "humidity": 45.0, "dust": 20.0, "noise": 65.0, "gas": 5.0}
+        readings = {"temperature": 23.0, "humidity": 45.0, "noise": 65.0, "gas": 5.0}
 
         # First capture
         res1 = tracker.record_snapshot(readings, tick=1, mode="manual")
@@ -137,9 +134,9 @@ class TestDuplicatePrevention:
 
     def test_records_when_readings_change_on_same_tick(self, tracker):
         """Changing a slider value on the same tick is captured as a distinct update."""
-        tracker.record_snapshot({"temperature": 23.0, "dust": 20.0}, tick=1)
+        tracker.record_snapshot({"temperature": 23.0, "noise": 65.0}, tick=1)
         # Slider moved to 35.0
-        res = tracker.record_snapshot({"temperature": 35.0, "dust": 20.0}, tick=1)
+        res = tracker.record_snapshot({"temperature": 35.0, "noise": 65.0}, tick=1)
         assert res is True
         assert tracker.snapshot_count == 2
 
@@ -151,33 +148,33 @@ class TestStateTransitionEvents:
     def test_green_to_orange_transition(self, tracker, simulator):
         """GREEN -> ORANGE (SAFE -> WARNING) logs a WARNING escalation event."""
         # Baseline SAFE
-        r0 = {"temperature": 24.0, "humidity": 45.0, "dust": 25.0, "noise": 65.0, "gas": 5.0}
+        r0 = {"temperature": 24.0, "humidity": 45.0, "noise": 65.0, "gas": 5.0}
         site0 = HazardAssessmentEngine.assess_site(r0, simulator.parameters_meta)
         tracker.record_events_from_assessment(site0, tick=0)
         assert tracker.event_count == 0
 
-        # Dust rises to WARNING (85 µg/m³)
-        r1 = {"temperature": 24.0, "humidity": 45.0, "dust": 85.0, "noise": 65.0, "gas": 5.0}
+        # Temperature rises to WARNING (36.0 °C)
+        r1 = {"temperature": 36.0, "humidity": 45.0, "noise": 65.0, "gas": 5.0}
         site1 = HazardAssessmentEngine.assess_site(r1, simulator.parameters_meta)
         ev1 = tracker.record_events_from_assessment(site1, tick=1)
 
         assert len(ev1) == 1
         event = ev1[0]
-        assert event.parameter_key == "dust"
+        assert event.parameter_key == "temperature"
         assert event.previous_status == HazardStatus.SAFE
         assert event.new_status == HazardStatus.WARNING
         assert event.is_warning is True
-        assert event.value == 85.0
+        assert event.value == 36.0
 
     def test_orange_to_red_transition(self, tracker, simulator):
         """ORANGE -> RED (WARNING -> DANGER) logs a DANGER escalation event."""
         # 1. Noise in WARNING (78 dB)
-        r1 = {"temperature": 24.0, "humidity": 45.0, "dust": 25.0, "noise": 78.0, "gas": 5.0}
+        r1 = {"temperature": 24.0, "humidity": 45.0, "noise": 78.0, "gas": 5.0}
         site1 = HazardAssessmentEngine.assess_site(r1, simulator.parameters_meta)
         tracker.record_events_from_assessment(site1, tick=1)
 
         # 2. Noise escalates to DANGER (90 dB)
-        r2 = {"temperature": 24.0, "humidity": 45.0, "dust": 25.0, "noise": 90.0, "gas": 5.0}
+        r2 = {"temperature": 24.0, "humidity": 45.0, "noise": 90.0, "gas": 5.0}
         site2 = HazardAssessmentEngine.assess_site(r2, simulator.parameters_meta)
         ev2 = tracker.record_events_from_assessment(site2, tick=2)
 
@@ -190,7 +187,7 @@ class TestStateTransitionEvents:
     def test_green_directly_to_red_transition(self, tracker, simulator):
         """GREEN -> RED (SAFE -> DANGER directly) logs a DANGER event."""
         # Gas spikes directly from safe baseline to critical (70 ppm)
-        r = {"temperature": 24.0, "humidity": 45.0, "dust": 25.0, "noise": 65.0, "gas": 70.0}
+        r = {"temperature": 24.0, "humidity": 45.0, "noise": 65.0, "gas": 70.0}
         site = HazardAssessmentEngine.assess_site(r, simulator.parameters_meta)
         ev = tracker.record_events_from_assessment(site, tick=1)
 
@@ -204,12 +201,12 @@ class TestStateTransitionEvents:
     def test_red_to_orange_and_orange_to_green_recovery(self, tracker, simulator):
         """RED -> ORANGE (de-escalation) and ORANGE -> GREEN (recovery) are logged."""
         # Step 1: Start at DANGER for Gas (65 ppm)
-        r_danger = {"temperature": 24.0, "humidity": 45.0, "dust": 25.0, "noise": 65.0, "gas": 65.0}
+        r_danger = {"temperature": 24.0, "humidity": 45.0, "noise": 65.0, "gas": 65.0}
         site_d = HazardAssessmentEngine.assess_site(r_danger, simulator.parameters_meta)
         tracker.record_events_from_assessment(site_d, tick=1)
 
         # Step 2: Drops to WARNING (30 ppm)
-        r_warn = {"temperature": 24.0, "humidity": 45.0, "dust": 25.0, "noise": 65.0, "gas": 30.0}
+        r_warn = {"temperature": 24.0, "humidity": 45.0, "noise": 65.0, "gas": 30.0}
         site_w = HazardAssessmentEngine.assess_site(r_warn, simulator.parameters_meta)
         ev_w = tracker.record_events_from_assessment(site_w, tick=2)
         assert len(ev_w) == 1
@@ -217,7 +214,7 @@ class TestStateTransitionEvents:
         assert ev_w[0].new_status == HazardStatus.WARNING
 
         # Step 3: Recovers to SAFE (8 ppm)
-        r_safe = {"temperature": 24.0, "humidity": 45.0, "dust": 25.0, "noise": 65.0, "gas": 8.0}
+        r_safe = {"temperature": 24.0, "humidity": 45.0, "noise": 65.0, "gas": 8.0}
         site_s = HazardAssessmentEngine.assess_site(r_safe, simulator.parameters_meta)
         ev_s = tracker.record_events_from_assessment(site_s, tick=3)
         assert len(ev_s) == 1
@@ -228,12 +225,12 @@ class TestStateTransitionEvents:
     def test_red_directly_to_green_recovery(self, tracker, simulator):
         """RED -> GREEN (DANGER directly to SAFE) logs a recovery event."""
         # 1. Temperature DANGER (45°C)
-        r1 = {"temperature": 45.0, "humidity": 45.0, "dust": 25.0, "noise": 65.0, "gas": 5.0}
+        r1 = {"temperature": 45.0, "humidity": 45.0, "noise": 65.0, "gas": 5.0}
         site1 = HazardAssessmentEngine.assess_site(r1, simulator.parameters_meta)
         tracker.record_events_from_assessment(site1, tick=1)
 
         # 2. Reset/cooled directly to SAFE (22°C)
-        r2 = {"temperature": 22.0, "humidity": 45.0, "dust": 25.0, "noise": 65.0, "gas": 5.0}
+        r2 = {"temperature": 22.0, "humidity": 45.0, "noise": 65.0, "gas": 5.0}
         site2 = HazardAssessmentEngine.assess_site(r2, simulator.parameters_meta)
         ev2 = tracker.record_events_from_assessment(site2, tick=2)
         assert len(ev2) == 1
@@ -248,27 +245,27 @@ class TestStateTransitionEvents:
 class TestSimultaneousHazardsAndOrdering:
     def test_simultaneous_hazards_tracked_independently(self, tracker, simulator):
         """Simultaneous hazards across different parameters are both captured as distinct events."""
-        # Dust enters WARNING and Gas enters DANGER on same tick
-        r = {"temperature": 24.0, "humidity": 45.0, "dust": 90.0, "noise": 65.0, "gas": 75.0}
+        # Temperature enters WARNING and Gas enters DANGER on same tick
+        r = {"temperature": 36.0, "humidity": 45.0, "noise": 65.0, "gas": 75.0}
         site = HazardAssessmentEngine.assess_site(r, simulator.parameters_meta)
         new_evs = tracker.record_events_from_assessment(site, tick=5)
 
         assert len(new_evs) == 2
         keys = {e.parameter_key for e in new_evs}
-        assert keys == {"dust", "gas"}
+        assert keys == {"temperature", "gas"}
 
     def test_chronological_ordering_accessors(self, tracker, simulator):
         """Chronological events accessor provides non-decreasing tick sequence."""
         # Tick 1: Noise WARNING
-        r1 = {"temperature": 24.0, "humidity": 45.0, "dust": 25.0, "noise": 78.0, "gas": 5.0}
+        r1 = {"temperature": 24.0, "humidity": 45.0, "noise": 78.0, "gas": 5.0}
         tracker.record_events_from_assessment(HazardAssessmentEngine.assess_site(r1, simulator.parameters_meta), tick=1)
 
         # Tick 3: Gas DANGER
-        r2 = {"temperature": 24.0, "humidity": 45.0, "dust": 25.0, "noise": 78.0, "gas": 80.0}
+        r2 = {"temperature": 24.0, "humidity": 45.0, "noise": 78.0, "gas": 80.0}
         tracker.record_events_from_assessment(HazardAssessmentEngine.assess_site(r2, simulator.parameters_meta), tick=3)
 
-        # Tick 5: Dust WARNING
-        r3 = {"temperature": 24.0, "humidity": 45.0, "dust": 100.0, "noise": 78.0, "gas": 80.0}
+        # Tick 5: Temperature WARNING
+        r3 = {"temperature": 36.0, "humidity": 45.0, "noise": 78.0, "gas": 80.0}
         tracker.record_events_from_assessment(HazardAssessmentEngine.assess_site(r3, simulator.parameters_meta), tick=5)
 
         chrono = tracker.chronological_events
@@ -285,8 +282,8 @@ class TestSummaryStatistics:
         # Record known snapshots
         t1 = datetime(2026, 10, 28, 10, 0, 0)
         t2 = datetime(2026, 10, 28, 10, 5, 0)
-        tracker.record_snapshot({"temperature": 20.0, "dust": 30.0}, tick=1, timestamp=t1, force=True)
-        tracker.record_snapshot({"temperature": 30.0, "dust": 50.0}, tick=2, timestamp=t2, force=True)
+        tracker.record_snapshot({"temperature": 20.0, "noise": 60.0}, tick=1, timestamp=t1, force=True)
+        tracker.record_snapshot({"temperature": 30.0, "noise": 80.0}, tick=2, timestamp=t2, force=True)
 
         stats = tracker.get_summary_statistics()
         assert stats["has_data"] is True
@@ -294,9 +291,9 @@ class TestSummaryStatistics:
         assert stats["parameters"]["temperature"]["min"] == 20.0
         assert stats["parameters"]["temperature"]["max"] == 30.0
         assert stats["parameters"]["temperature"]["mean"] == 25.0
-        assert stats["parameters"]["dust"]["min"] == 30.0
-        assert stats["parameters"]["dust"]["max"] == 50.0
-        assert stats["parameters"]["dust"]["mean"] == 40.0
+        assert stats["parameters"]["noise"]["min"] == 60.0
+        assert stats["parameters"]["noise"]["max"] == 80.0
+        assert stats["parameters"]["noise"]["mean"] == 70.0
         assert stats["time_range"]["duration_seconds"] == 300.0
         assert stats["time_range"]["duration_formatted"] == "00:05:00"
 
@@ -319,7 +316,6 @@ class TestReportExports:
         tracker.record_snapshot({
             "temperature": 24.5,
             "humidity": 50.0,
-            "dust": 35.0,
             "noise": 68.0,
             "gas": 8.0,
         }, tick=1)
@@ -328,7 +324,6 @@ class TestReportExports:
         assert "SIMULATED DATA ONLY" in csv_str
         assert "Temperature (deg C)" in csv_str
         assert "Relative Humidity (%)" in csv_str
-        assert "Dust Concentration (ug/m3)" in csv_str
         assert "Noise Level (dB)" in csv_str
         assert "Gas Concentration (ppm)" in csv_str
 
@@ -340,7 +335,7 @@ class TestReportExports:
 
     def test_export_events_csv_headers_and_parsing(self, tracker, simulator):
         """Exported events CSV contains required columns and parses cleanly."""
-        r = {"temperature": 24.0, "humidity": 45.0, "dust": 25.0, "noise": 85.0, "gas": 5.0}
+        r = {"temperature": 24.0, "humidity": 45.0, "noise": 85.0, "gas": 5.0}
         tracker.record_events_from_assessment(HazardAssessmentEngine.assess_site(r, simulator.parameters_meta), tick=1)
 
         csv_str = tracker.export_events_csv()
@@ -357,7 +352,7 @@ class TestReportExports:
     def test_export_json_report_schema_and_validity(self, tracker, simulator):
         """Exported JSON report contains metadata, configured thresholds, statistics, and events."""
         tracker.record_snapshot({"temperature": 24.0}, tick=1)
-        r = {"temperature": 24.0, "humidity": 45.0, "dust": 25.0, "noise": 85.0, "gas": 5.0}
+        r = {"temperature": 24.0, "humidity": 45.0, "noise": 85.0, "gas": 5.0}
         tracker.record_events_from_assessment(HazardAssessmentEngine.assess_site(r, simulator.parameters_meta), tick=1)
 
         json_str = tracker.export_json_report_str(configured_thresholds=simulator.parameters_meta)
@@ -398,7 +393,6 @@ class TestMissingAndInvalidValues:
         dirty_readings = {
             "temperature": float("nan"),
             "humidity": None,
-            "dust": float("inf"),
             "noise": -float("inf"),
             # gas omitted entirely
         }
@@ -409,7 +403,6 @@ class TestMissingAndInvalidValues:
         row = df.iloc[0]
         assert row["temperature"] == 0.0
         assert row["humidity"] == 0.0
-        assert row["dust"] == 0.0
         assert row["noise"] == 0.0
         assert row["gas"] == 0.0
 

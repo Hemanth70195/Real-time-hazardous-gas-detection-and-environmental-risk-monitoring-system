@@ -153,6 +153,9 @@ class HazardHistoryTracker:
         site_assessment: Optional[SiteHazardAssessment] = None,
         mode: str = "manual",
         force: bool = False,
+        data_source: str = "simulation",
+        device_id: Optional[str] = None,
+        extra_data: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
         Records a timestamped telemetry snapshot across all 5 parameters.
@@ -165,7 +168,7 @@ class HazardHistoryTracker:
 
         # Extract numerical values safely
         extracted_vals: Dict[str, float] = {}
-        for key in ["temperature", "humidity", "dust", "noise", "gas"]:
+        for key in ["temperature", "humidity", "noise", "gas"]:
             val = readings.get(key, 0.0)
             if isinstance(val, EnvironmentalReading):
                 num_val = float(val.value)
@@ -186,7 +189,6 @@ class HazardHistoryTracker:
             mode,
             extracted_vals["temperature"],
             extracted_vals["humidity"],
-            extracted_vals["dust"],
             extracted_vals["noise"],
             extracted_vals["gas"],
         )
@@ -199,13 +201,18 @@ class HazardHistoryTracker:
         # Extract statuses if site_assessment provided
         status_temp = "SAFE"
         status_hum = "SAFE"
-        status_dust = "SAFE"
         status_noise = "SAFE"
         status_gas = "SAFE"
         overall_status_val = "SAFE"
         overall_status_color = "GREEN"
 
         if site_assessment is not None:
+            if hasattr(site_assessment, "data_source") and site_assessment.data_source:
+                data_source = site_assessment.data_source
+            if hasattr(site_assessment, "device_id") and site_assessment.device_id:
+                device_id = site_assessment.device_id
+            if hasattr(site_assessment, "extra_measurements") and site_assessment.extra_measurements and not extra_data:
+                extra_data = site_assessment.extra_measurements
             overall_status_val = site_assessment.overall_status.value
             overall_status_color = site_assessment.overall_status.color_label
             ass_dict = site_assessment.all_assessments
@@ -213,12 +220,17 @@ class HazardHistoryTracker:
                 status_temp = ass_dict["temperature"].status.value
             if "humidity" in ass_dict:
                 status_hum = ass_dict["humidity"].status.value
-            if "dust" in ass_dict:
-                status_dust = ass_dict["dust"].status.value
             if "noise" in ass_dict:
                 status_noise = ass_dict["noise"].status.value
             if "gas" in ass_dict:
                 status_gas = ass_dict["gas"].status.value
+
+        gas_raw_val = extra_data.get("gas_raw") if extra_data else None
+        noise_raw_val = extra_data.get("noise_raw") if extra_data else None
+
+        is_live = (data_source == "live_esp32")
+        gas_cal_label = "Uncalibrated Raw ADC" if is_live else "Calibrated (ppm)"
+        noise_cal_label = "Uncalibrated Raw ADC" if is_live else "Calibrated (dB)"
 
         snap_entry: Dict[str, Any] = {
             "Timestamp": time_only_str,
@@ -226,14 +238,18 @@ class HazardHistoryTracker:
             "ISO_Timestamp": now_dt.isoformat(),
             "Tick": tick,
             "Mode": mode,
+            "Data_Source": data_source,
+            "Device_ID": device_id or ("simulated-node" if not is_live else "esp32-node"),
             "temperature": extracted_vals["temperature"],
             "humidity": extracted_vals["humidity"],
-            "dust": extracted_vals["dust"],
             "noise": extracted_vals["noise"],
             "gas": extracted_vals["gas"],
+            "gas_raw": gas_raw_val,
+            "noise_raw": noise_raw_val,
+            "gas_calibration_status": gas_cal_label,
+            "noise_calibration_status": noise_cal_label,
             "status_temperature": status_temp,
             "status_humidity": status_hum,
-            "status_dust": status_dust,
             "status_noise": status_noise,
             "status_gas": status_gas,
             "overall_status": overall_status_val,
@@ -330,8 +346,8 @@ class HazardHistoryTracker:
         """Returns the rolling snapshots as a pandas DataFrame."""
         if not self.snapshots:
             return pd.DataFrame(columns=[
-                "Timestamp", "Tick", "Mode", "temperature", "humidity", "dust", "noise", "gas",
-                "status_temperature", "status_humidity", "status_dust", "status_noise", "status_gas",
+                "Timestamp", "Tick", "Mode", "temperature", "humidity", "noise", "gas",
+                "status_temperature", "status_humidity", "status_noise", "status_gas",
                 "overall_status", "overall_status_color"
             ])
         return pd.DataFrame(self.snapshots)
@@ -360,7 +376,6 @@ class HazardHistoryTracker:
         params_info = {
             "temperature": {"name": "Temperature", "unit": "°C"},
             "humidity": {"name": "Relative Humidity", "unit": "%"},
-            "dust": {"name": "Dust Concentration", "unit": "µg/m³"},
             "noise": {"name": "Noise Level", "unit": "dB"},
             "gas": {"name": "Gas Concentration", "unit": "ppm"},
         }
@@ -461,14 +476,18 @@ class HazardHistoryTracker:
         """
         export_columns = {
             "Full_Timestamp": "Timestamp",
+            "Data_Source": "Data Source",
+            "Device_ID": "Device ID",
             "temperature": "Temperature (deg C)",
             "humidity": "Relative Humidity (%)",
-            "dust": "Dust Concentration (ug/m3)",
             "noise": "Noise Level (dB)",
             "gas": "Gas Concentration (ppm)",
+            "gas_raw": "Raw Gas MQ135 (ADC)",
+            "noise_raw": "Raw Noise Mic (ADC)",
+            "gas_calibration_status": "Gas Calibration Status",
+            "noise_calibration_status": "Noise Calibration Status",
             "status_temperature": "Status Temperature",
             "status_humidity": "Status Humidity",
-            "status_dust": "Status Dust",
             "status_noise": "Status Noise",
             "status_gas": "Status Gas",
             "overall_status": "Overall Site Status",

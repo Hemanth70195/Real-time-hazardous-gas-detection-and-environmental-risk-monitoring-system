@@ -38,6 +38,8 @@ class HazardAssessment:
     status: HazardStatus
     reason: str
     recommended_actions: List[str]
+    is_uncalibrated: bool = False
+    calibration_status: str = "calibrated"
     severity: int = field(init=False)
 
     def __post_init__(self):
@@ -72,6 +74,8 @@ class HazardAssessment:
             "reason": self.reason,
             "recommended_actions": list(self.recommended_actions),
             "disclaimer": SIMULATED_DATA_DISCLAIMER_SHORT,
+            "is_uncalibrated": self.is_uncalibrated,
+            "calibration_status": self.calibration_status,
         }
 
 
@@ -84,6 +88,9 @@ class SiteHazardAssessment:
     safe_parameters: List[HazardAssessment]
     all_assessments: Dict[str, HazardAssessment]
     disclaimer: str = SIMULATED_DATA_DISCLAIMER_SHORT
+    data_source: str = "simulation"
+    device_id: Optional[str] = None
+    extra_measurements: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def has_hazards(self) -> bool:
@@ -97,6 +104,10 @@ class SiteHazardAssessment:
     def warning_count(self) -> int:
         return sum(1 for h in self.active_hazards if h.status == HazardStatus.WARNING)
 
+    @property
+    def uncalibrated_count(self) -> int:
+        return sum(1 for h in self.all_assessments.values() if h.is_uncalibrated)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "overall_status": self.overall_status.value,
@@ -104,6 +115,10 @@ class SiteHazardAssessment:
             "overall_summary": self.overall_summary,
             "danger_count": self.danger_count,
             "warning_count": self.warning_count,
+            "uncalibrated_count": self.uncalibrated_count,
+            "data_source": self.data_source,
+            "device_id": self.device_id,
+            "extra_measurements": dict(self.extra_measurements),
             "active_hazards": [h.to_dict() for h in self.active_hazards],
             "safe_parameters": [s.to_dict() for s in self.safe_parameters],
             "all_assessments": {k: v.to_dict() for k, v in self.all_assessments.items()},
@@ -426,6 +441,7 @@ class HazardAssessmentEngine:
         param_key: str,
         value: Optional[Union[int, float]],
         param_meta: Dict[str, Any],
+        is_uncalibrated: bool = False,
     ) -> HazardAssessment:
         """
         Assesses a single parameter reading safely, returning a comprehensive HazardAssessment.
@@ -457,6 +473,49 @@ class HazardAssessmentEngine:
         min_val = float(param_meta.get("min_value", -1000.0))
         max_val = float(param_meta.get("max_value", 10000.0))
         clamped_val = max(min_val, min(max_val, float(value)))
+
+        # Check if raw uncalibrated sensor data (e.g., raw ADC for MQ-135 or microphone)
+        if is_uncalibrated:
+            if param_key in ("gas", "gas_raw"):
+                return HazardAssessment(
+                    parameter_key="gas",
+                    display_name=f"{display_name} (Raw MQ-135)",
+                    value=clamped_val,
+                    unit="ADC counts",
+                    status=HazardStatus.WARNING,
+                    reason=(
+                        f"RAW UNCALIBRATED SENSOR DATA: Received raw MQ-135 ADC output ({clamped_val:.0f} counts). "
+                        "Gas concentration in ppm is unavailable without validated hardware calibration. "
+                        "Ppm hazard thresholds cannot be applied to raw ADC values. Do not assume atmospheric conditions are safe."
+                    ),
+                    recommended_actions=[
+                        "Do NOT classify raw uncalibrated gas sensor output as safe.",
+                        "Deploy certified portable multi-gas detector for active atmospheric clearance.",
+                        "Perform laboratory multi-point gas calibration before applying ppm safety thresholds.",
+                    ],
+                    is_uncalibrated=True,
+                    calibration_status="uncalibrated",
+                )
+            elif param_key in ("noise", "noise_raw"):
+                return HazardAssessment(
+                    parameter_key="noise",
+                    display_name=f"{display_name} (Raw Mic)",
+                    value=clamped_val,
+                    unit="ADC counts",
+                    status=HazardStatus.WARNING,
+                    reason=(
+                        f"RAW UNCALIBRATED SENSOR DATA: Received raw microphone ADC output ({clamped_val:.0f} counts). "
+                        "Sound level in decibels (dB) is unavailable without validated acoustic calibration. "
+                        "Occupational dB thresholds cannot be applied to raw ADC values. Do not assume acoustic conditions are safe."
+                    ),
+                    recommended_actions=[
+                        "Do NOT classify raw uncalibrated microphone output as safe.",
+                        "Deploy certified Type 1/2 sound level meter for regulatory occupational noise compliance.",
+                        "Perform acoustic calibration with a reference sound calibrator before applying dB thresholds.",
+                    ],
+                    is_uncalibrated=True,
+                    calibration_status="uncalibrated",
+                )
 
         # Route evaluation by parameter key
         if param_key == "temperature":
@@ -500,15 +559,17 @@ class HazardAssessmentEngine:
 
         for key, meta in parameters_meta.items():
             val = None
+            is_uncalibrated = False
             if key in readings:
                 raw_reading = readings[key]
                 if isinstance(raw_reading, EnvironmentalReading):
                     val = raw_reading.value
                 elif isinstance(raw_reading, (int, float)):
                     val = raw_reading
-                elif isinstance(raw_reading, dict) and "value" in raw_reading:
-                    val = raw_reading["value"]
-            all_assessments[key] = cls.assess_parameter(key, val, meta)
+                elif isinstance(raw_reading, dict):
+                    val = raw_reading.get("value")
+                    is_uncalibrated = bool(raw_reading.get("is_uncalibrated", False))
+            all_assessments[key] = cls.assess_parameter(key, val, meta, is_uncalibrated=is_uncalibrated)
 
         # Separate into active hazards (WARNING or DANGER) and safe parameters (SAFE)
         active_hazards = [a for a in all_assessments.values() if not a.is_safe]
@@ -547,3 +608,52 @@ class HazardAssessmentEngine:
             all_assessments=all_assessments,
             disclaimer=SIMULATED_DATA_DISCLAIMER_SHORT,
         )
+
+    @classmethod
+    def assess_esp32_reading(
+        cls,
+        esp32_data: Any,
+        parameters_meta: Dict[str, Any],
+        pm_dust_field: str = "pm10",
+    ) -> SiteHazardAssessment:
+        """
+        Maps validated ESP32 live telemetry into the hazard assessment engine:
+        - temperature_c -> Temperature (°C) [calibrated]
+        - humidity_pct -> Humidity (%) [calibrated]
+        - pm10 / pm2_5 -> Dust (µg/m³) [calibrated particulate measurement]
+        - gas_raw -> Raw MQ-135 ADC [RAW UNCALIBRATED - never evaluated against ppm thresholds]
+        - noise_raw -> Raw Microphone ADC [RAW UNCALIBRATED - never evaluated against dB thresholds]
+        - Preserves individual pm1_0, pm2_5, and pm10 in extra_measurements
+        """
+        if hasattr(esp32_data, "temperature_c"):
+            t_val = esp32_data.temperature_c
+            h_val = esp32_data.humidity_pct
+            g_raw = esp32_data.gas_raw
+            n_raw = esp32_data.noise_raw
+            dev_id = esp32_data.device_id
+        else:
+            t_val = esp32_data.get("temperature_c")
+            h_val = esp32_data.get("humidity_pct")
+            g_raw = esp32_data.get("gas_raw")
+            n_raw = esp32_data.get("noise_raw")
+            dev_id = esp32_data.get("device_id", "safeedge-esp32")
+
+        readings_map: Dict[str, Any] = {
+            "temperature": {"value": t_val, "is_uncalibrated": False},
+            "humidity": {"value": h_val, "is_uncalibrated": False},
+            "gas": {"value": g_raw, "is_uncalibrated": True},
+            "noise": {"value": n_raw, "is_uncalibrated": True},
+        }
+
+        assessment = cls.assess_site(readings_map, parameters_meta)
+        assessment.data_source = "live_esp32"
+        assessment.device_id = dev_id
+        assessment.disclaimer = (
+            f"LIVE SENSOR DATA · Source: ESP32 [{dev_id}]. "
+            "Note: MQ-135 Gas and Noise ADC values are uncalibrated raw readings."
+        )
+        assessment.extra_measurements = {
+            "gas_raw": g_raw,
+            "noise_raw": n_raw,
+        }
+        return assessment

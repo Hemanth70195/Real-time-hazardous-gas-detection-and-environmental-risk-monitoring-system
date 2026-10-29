@@ -1,0 +1,23 @@
+# =============================================================================
+# SafeEdge HazardGuard - Streamlit Production Configuration
+# =============================================================================
+
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+address = "0.0.0.0"
+port = 8501
+maxUploadSize = 50
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "dark"
+primaryColor = "#3b82f6"
+backgroundColor = "#0d1117"
+secondaryBackgroundColor = "#161b22"
+textColor = "#f9fafb"
+font = "sans serif"
+

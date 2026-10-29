@@ -33,8 +33,19 @@ from components import (
     render_recommended_action_card,
     render_sensor_nodes_table,
     render_status_bar,
+    render_hardware_connection_panel,
+    render_cloud_connection_panel,
+)
+from core.cloud_sensor_receiver import (
+    get_cloud_receiver,
+    CloudSensorReceiver,
 )
 from simulator import SCENARIOS, SENSOR_NODES, get_simulator, read_sensors
+from core.serial_sensor_receiver import (
+    get_serial_receiver,
+    SerialSensorReceiver,
+    SerialConnectionStatus,
+)
 
 st.set_page_config(
     page_title="SafeEdge HazardGuard - Industrial Monitoring",
@@ -47,6 +58,19 @@ STYLES_FILE = PROJECT_ROOT / "styles.css"
 if STYLES_FILE.exists():
     with open(STYLES_FILE, "r", encoding="utf-8") as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+
+def get_env_or_secret(key: str, default: str = "") -> str:
+    """Reads configuration from os.getenv or Streamlit secrets with fallback."""
+    val = os.getenv(key)
+    if val:
+        return val.strip()
+    try:
+        if hasattr(st, "secrets") and key in st.secrets:
+            return str(st.secrets[key]).strip()
+    except Exception:
+        pass
+    return default
 
 
 def init_session_state():
@@ -71,8 +95,8 @@ def init_session_state():
         # Initial event entries matching reference mockup
         st.session_state.event_log = [
             {"time": "14:32:08", "node": "GAS-01", "message": "Reading 8 ppm", "severity": "Normal"},
-            {"time": "14:21:03", "node": "PM-03", "message": "Dust back to 30", "severity": "Cleared"},
-            {"time": "14:18:41", "node": "PM-03", "message": "Dust 112 µg/m³", "severity": "Warning"},
+            {"time": "14:21:03", "node": "DHT-02", "message": "Temperature normalized to 24 °C", "severity": "Cleared"},
+            {"time": "14:18:41", "node": "DHT-02", "message": "Temperature elevated 36 °C", "severity": "Warning"},
             {"time": "13:56:27", "node": "MIC-04", "message": "Noise 88 dB", "severity": "Warning"},
         ]
 
@@ -81,6 +105,34 @@ def init_session_state():
 
     if "feed_mode" not in st.session_state:
         st.session_state.feed_mode = "Live sensor feed"
+
+    # Data Source Mode (Simulation Mode vs Live Hardware Mode)
+    if "data_source_mode" not in st.session_state:
+        st.session_state.data_source_mode = "Simulation Mode"
+
+    # Hardware serial connection settings
+    if "serial_port" not in st.session_state:
+        st.session_state.serial_port = "COM3"
+    if "serial_baud_rate" not in st.session_state:
+        st.session_state.serial_baud_rate = 115200
+    if "serial_connected" not in st.session_state:
+        st.session_state.serial_connected = False
+    if "history_source_tags" not in st.session_state:
+        st.session_state.history_source_tags = ["simulation"] * 60
+
+    # Cloud IoT streaming connection settings (reads from production env/secrets)
+    default_backend_url = get_env_or_secret("SAFEEDGE_BACKEND_URL", "http://localhost:8000")
+    default_device_id = get_env_or_secret("SAFEEDGE_DEVICE_ID", "safeedge-esp32-01")
+    default_api_key = get_env_or_secret("SAFEEDGE_API_KEY", "")
+
+    if "cloud_backend_url" not in st.session_state:
+        st.session_state.cloud_backend_url = default_backend_url
+    if "cloud_device_id" not in st.session_state:
+        st.session_state.cloud_device_id = default_device_id
+    if "cloud_api_key" not in st.session_state:
+        st.session_state.cloud_api_key = default_api_key
+    if "cloud_connected" not in st.session_state:
+        st.session_state.cloud_connected = False
 
     # History page filters
     if "hist_time_range" not in st.session_state:
@@ -120,23 +172,175 @@ def main():
     )
 
     st.sidebar.markdown("---")
-    st.sidebar.markdown(
-        """
-        <div style="font-size: 0.82rem; color: #9ca3af; line-height: 1.6;">
-            <div style="font-weight: 700; text-transform: uppercase; font-size: 0.74rem; letter-spacing: 0.05em; color: #d1d5db; margin-bottom: 8px;">
-                IoT hardware
-            </div>
-            <div style="color: #e5e7eb;">GAS-01 MQ-135</div>
-            <div style="color: #e5e7eb;">DHT-02 DHT22</div>
-            <div style="color: #e5e7eb;">PM-03 PMS5003</div>
-            <div style="color: #e5e7eb;">MIC-04 Sound</div>
-            <div style="margin-top: 14px; color: #0ca30c; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-                <span style="font-size: 1.1rem; line-height: 0;">●</span> Hardware: online
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.sidebar.markdown("**Data Source Mode:**")
+    source_options = [
+        "Simulation Mode",
+        "Live Hardware Mode (ESP32 Serial)",
+        "Cloud Live Mode (IoT Streaming)",
+    ]
+    current_idx = 0
+    if st.session_state.data_source_mode in source_options:
+        current_idx = source_options.index(st.session_state.data_source_mode)
+
+    selected_source = st.sidebar.radio(
+        "Data Source Mode Selector",
+        source_options,
+        index=current_idx,
+        label_visibility="collapsed",
     )
+    if selected_source != st.session_state.data_source_mode:
+        st.session_state.data_source_mode = selected_source
+        sim = get_simulator()
+        if selected_source == "Live Hardware Mode (ESP32 Serial)":
+            sim.set_data_source("live_esp32")
+        elif selected_source == "Cloud Live Mode (IoT Streaming)":
+            sim.set_data_source("cloud_esp32")
+        else:
+            sim.set_data_source("simulation")
+        st.rerun()
+
+    receiver = get_serial_receiver()
+    status_info = receiver.get_status()
+
+    # Hardware connection controls when in Live Hardware Mode
+    if st.session_state.data_source_mode == "Live Hardware Mode (ESP32 Serial)":
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("**ESP32 Serial Configuration:**")
+
+        # Discover ports
+        available_ports = SerialSensorReceiver.list_available_ports()
+        port_names = [p["port"] for p in available_ports]
+        if not port_names:
+            port_names = ["COM3", "COM4", "COM5", "/dev/ttyUSB0"]
+
+        default_port_idx = 0
+        if st.session_state.serial_port in port_names:
+            default_port_idx = port_names.index(st.session_state.serial_port)
+
+        col_p1, col_p2 = st.sidebar.columns([3, 1])
+        with col_p1:
+            sel_port = st.selectbox("Serial Port", port_names, index=default_port_idx, label_visibility="collapsed")
+            st.session_state.serial_port = sel_port
+        with col_p2:
+            if st.button("🔄", help="Rescan available COM ports"):
+                st.rerun()
+
+        # Baud rate selector
+        baud_options = [115200, 9600, 19200, 38400, 57600, 230400]
+        baud_idx = baud_options.index(st.session_state.serial_baud_rate) if st.session_state.serial_baud_rate in baud_options else 0
+        sel_baud = st.sidebar.selectbox("Baud Rate", baud_options, index=baud_idx)
+        st.session_state.serial_baud_rate = sel_baud
+
+        # Connect / Disconnect Buttons
+        is_conn = status_info.get("is_connected", False)
+        if not is_conn:
+            if st.sidebar.button("Connect ESP32", type="primary", use_container_width=True):
+                success = receiver.connect(st.session_state.serial_port, st.session_state.serial_baud_rate)
+                if success:
+                    st.session_state.serial_connected = True
+                st.rerun()
+        else:
+            if st.sidebar.button("Disconnect ESP32", type="secondary", use_container_width=True):
+                receiver.disconnect()
+                st.session_state.serial_connected = False
+                st.rerun()
+
+        # Connection status indicator pill
+        if is_conn and not status_info.get("is_stale", False):
+            st.sidebar.markdown(
+                '<div style="margin-top: 10px; color: #10b981; font-weight: 600; font-size: 0.82rem; display: flex; align-items: center; gap: 6px;">'
+                '<span style="font-size: 1.1rem; line-height: 0;">●</span> Live ESP32: connected'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        elif is_conn and status_info.get("is_stale", False):
+            st.sidebar.markdown(
+                '<div style="margin-top: 10px; color: #f59e0b; font-weight: 600; font-size: 0.82rem; display: flex; align-items: center; gap: 6px;">'
+                '<span style="font-size: 1.1rem; line-height: 0;">▲</span> Data Stale (>5s)'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.sidebar.markdown(
+                '<div style="margin-top: 10px; color: #9ca3af; font-weight: 500; font-size: 0.82rem; display: flex; align-items: center; gap: 6px;">'
+                '<span style="font-size: 1.1rem; line-height: 0;">○</span> Serial: disconnected'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+    elif st.session_state.data_source_mode == "Cloud Live Mode (IoT Streaming)":
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("**Cloud IoT Configuration:**")
+
+        backend_url_in = st.sidebar.text_input(
+            "Backend URL",
+            value=st.session_state.cloud_backend_url,
+            help="FastAPI / IoT ingestion backend URL",
+        )
+        st.session_state.cloud_backend_url = backend_url_in.strip()
+
+        target_dev_in = st.sidebar.text_input(
+            "Device ID",
+            value=st.session_state.cloud_device_id,
+            help="ESP32 hardware unique identifier",
+        )
+        st.session_state.cloud_device_id = target_dev_in.strip()
+
+        api_key_in = st.sidebar.text_input(
+            "API Key (Optional)",
+            value=st.session_state.cloud_api_key,
+            type="password",
+            help="X-API-Key header credential if required by server",
+        )
+        st.session_state.cloud_api_key = api_key_in.strip()
+
+        cloud_receiver = get_cloud_receiver()
+        cloud_receiver.configure(
+            backend_url=st.session_state.cloud_backend_url,
+            device_id=st.session_state.cloud_device_id,
+            api_key=st.session_state.cloud_api_key or None,
+        )
+        c_status = cloud_receiver.get_status()
+
+        if c_status.get("is_connected") and not c_status.get("is_stale"):
+            st.sidebar.markdown(
+                '<div style="margin-top: 10px; color: #a855f7; font-weight: 600; font-size: 0.82rem; display: flex; align-items: center; gap: 6px;">'
+                '<span style="font-size: 1.1rem; line-height: 0;">●</span> Cloud IoT: connected'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        elif c_status.get("is_connected") and c_status.get("is_stale"):
+            st.sidebar.markdown(
+                '<div style="margin-top: 10px; color: #f59e0b; font-weight: 600; font-size: 0.82rem; display: flex; align-items: center; gap: 6px;">'
+                '<span style="font-size: 1.1rem; line-height: 0;">▲</span> Cloud: data stale'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.sidebar.markdown(
+                '<div style="margin-top: 10px; color: #9ca3af; font-weight: 500; font-size: 0.82rem; display: flex; align-items: center; gap: 6px;">'
+                '<span style="font-size: 1.1rem; line-height: 0;">○</span> Cloud: awaiting data'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+    else:
+        # Simulation Mode Sidebar Info
+        st.sidebar.markdown("---")
+        st.sidebar.markdown(
+            """
+            <div style="font-size: 0.82rem; color: #9ca3af; line-height: 1.6;">
+                <div style="font-weight: 700; text-transform: uppercase; font-size: 0.74rem; letter-spacing: 0.05em; color: #d1d5db; margin-bottom: 8px;">
+                    Simulated IoT hardware
+                </div>
+                <div style="color: #e5e7eb;">GAS-01 MQ-135 (Simulated)</div>
+                <div style="color: #e5e7eb;">DHT-02 DHT22 (Simulated)</div>
+                                <div style="color: #e5e7eb;">MIC-04 Sound (Simulated)</div>
+                <div style="margin-top: 14px; color: #60a5fa; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                    <span style="font-size: 1.1rem; line-height: 0;">●</span> Simulation: active
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     if page == "Complete Monitoring Cockpit":
         render_cockpit_page()
@@ -155,13 +359,102 @@ def main():
 @st.fragment(run_every="2s")
 def render_live_telemetry_grid():
     """
-    Auto-refreshing fragment simulating real IoT streaming telemetry.
+    Auto-refreshing fragment displaying live IoT streaming telemetry or simulation.
     Refreshes every 2 seconds without full page reload.
+    Supports Simulation Mode, Live Hardware Mode (ESP32 Serial), and Cloud Live Mode (IoT Streaming).
     """
     sim = get_simulator()
-    telemetry = sim.read_sensors()
-    readings = telemetry["readings"]
+    is_live_mode = (st.session_state.data_source_mode == "Live Hardware Mode (ESP32 Serial)")
+    is_cloud_mode = (st.session_state.data_source_mode == "Cloud Live Mode (IoT Streaming)")
+    if is_cloud_mode:
+        source_arg = "cloud_esp32"
+    elif is_live_mode:
+        source_arg = "live_esp32"
+    else:
+        source_arg = "simulation"
+
+    if is_cloud_mode:
+        cloud_receiver = get_cloud_receiver()
+        cloud_receiver.configure(
+            backend_url=st.session_state.cloud_backend_url,
+            device_id=st.session_state.cloud_device_id,
+            api_key=st.session_state.cloud_api_key or None,
+        )
+
+    telemetry = sim.read_sensors(data_source=source_arg)
     now_str = datetime.now().strftime("%H:%M:%S")
+
+    # If Cloud Live Mode and data is unavailable or stale, show warning banner and cloud panel
+    if is_cloud_mode and (telemetry.get("is_stale", False) or telemetry.get("readings") is None):
+        cloud_receiver = get_cloud_receiver()
+        status_info = cloud_receiver.get_status()
+
+        render_cloud_connection_panel(
+            status_info=status_info,
+            current_backend_url=st.session_state.cloud_backend_url,
+            current_device_id=st.session_state.cloud_device_id,
+        )
+
+        st.warning(
+            f"⚠️ **CLOUD SENSOR DATA UNAVAILABLE / STALE**: No telemetry received from device "
+            f"`{st.session_state.cloud_device_id}` via backend `{st.session_state.cloud_backend_url}` within timeout ({cloud_receiver.stale_timeout_seconds}s).\n\n"
+            "- Ensure the FastAPI ingestion backend is running (`uvicorn backend.app:app --port 8000`).\n"
+            "- Verify that the ESP32 is connected to Wi-Fi and streaming to the cloud ingestion broker / API.\n"
+            "- Check API key authentication and target device ID in the sidebar, or switch to **Simulation Mode**."
+        )
+
+        render_status_bar(
+            site_status="warning",
+            danger_count=0,
+            warning_count=1,
+            safe_count=0,
+            total_count=4,
+            updated_seconds_ago=None,
+            data_source="cloud_esp32",
+            device_id=status_info.get("device_id") or st.session_state.cloud_device_id,
+            is_stale=True,
+            connection_status=status_info.get("status", "DISCONNECTED"),
+            uncalibrated_count=0,
+        )
+        return
+
+    # If Live Mode and data is unavailable or stale, show warning banner and connection panel
+    if is_live_mode and (telemetry.get("is_stale", False) or telemetry.get("readings") is None):
+        receiver = get_serial_receiver()
+        status_info = receiver.get_status()
+
+        render_hardware_connection_panel(
+            status_info=status_info,
+            available_ports=SerialSensorReceiver.list_available_ports(),
+            current_port=st.session_state.serial_port,
+            current_baud=st.session_state.serial_baud_rate,
+        )
+
+        st.warning(
+            f"⚠️ **SENSOR DATA UNAVAILABLE / STALE**: No active telemetry received from ESP32 on port "
+            f"`{st.session_state.serial_port}` within timeout ({receiver.stale_timeout_seconds}s).\n\n"
+            "- Verify ESP32 USB cable is securely connected.\n"
+            "- Ensure the firmware is outputting valid JSON at 115200 baud.\n"
+            "- Click **Connect ESP32** in the sidebar, or switch **Data Source Mode** to **Simulation Mode**."
+        )
+
+        render_status_bar(
+            site_status="warning",
+            danger_count=0,
+            warning_count=1,
+            safe_count=0,
+            total_count=4,
+            updated_seconds_ago=None,
+            data_source="live_esp32",
+            device_id=status_info.get("device_id") or "safeedge-esp32",
+            is_stale=True,
+            connection_status=status_info.get("status", "DISCONNECTED"),
+            uncalibrated_count=0,
+        )
+        return
+
+    readings = telemetry["readings"]
+    data_source_tag = telemetry.get("data_source", "simulation")
 
     # Update rolling 60 readings history
     for k, r in readings.items():
@@ -169,31 +462,55 @@ def render_live_telemetry_grid():
         if len(st.session_state.telemetry_history[k]) > 60:
             st.session_state.telemetry_history[k].pop(0)
 
-        # Check for threshold state transitions to log events
-        prev_s = st.session_state.prev_statuses.get(k, "SAFE")
-        new_s = r["status"]
-        if new_s != prev_s:
-            st.session_state.prev_statuses[k] = new_s
-            node_id = r["node"]
-            if new_s == "SAFE" and prev_s in ("WARNING", "DANGER"):
-                sev_label = "Cleared"
-                msg = f"{r['name']} normalized to {r['value']} {r['unit']}"
-            elif new_s == "WARNING":
-                sev_label = "Warning"
-                msg = f"{r['name']} elevated to {r['value']} {r['unit']}"
-            elif new_s == "DANGER":
-                sev_label = "Danger"
-                msg = f"CRITICAL: {r['name']} at {r['value']} {r['unit']}"
-            else:
-                sev_label = "Normal"
-                msg = f"{r['name']} reading {r['value']} {r['unit']}"
+        # Check for threshold state transitions to log events (calibrated parameters)
+        if not r.get("is_uncalibrated", False):
+            prev_s = st.session_state.prev_statuses.get(k, "SAFE")
+            new_s = r["status"]
+            if new_s != prev_s:
+                st.session_state.prev_statuses[k] = new_s
+                node_id = r["node"]
+                if new_s == "SAFE" and prev_s in ("WARNING", "DANGER"):
+                    sev_label = "Cleared"
+                    msg = f"{r['name']} normalized to {r['value']} {r['unit']}"
+                elif new_s == "WARNING":
+                    sev_label = "Warning"
+                    msg = f"{r['name']} elevated to {r['value']} {r['unit']}"
+                elif new_s == "DANGER":
+                    sev_label = "Danger"
+                    msg = f"CRITICAL: {r['name']} at {r['value']} {r['unit']}"
+                else:
+                    sev_label = "Normal"
+                    msg = f"{r['name']} reading {r['value']} {r['unit']}"
 
-            st.session_state.event_log.insert(
-                0,
-                {"time": now_str, "node": node_id, "message": msg, "severity": sev_label},
-            )
-            if len(st.session_state.event_log) > 100:
-                st.session_state.event_log.pop()
+                st.session_state.event_log.insert(
+                    0,
+                    {"time": now_str, "node": node_id, "message": msg, "severity": sev_label},
+                )
+                if len(st.session_state.event_log) > 100:
+                    st.session_state.event_log.pop()
+
+    # Track data source in history
+    if "history_source_tags" in st.session_state:
+        st.session_state.history_source_tags.append(data_source_tag)
+        if len(st.session_state.history_source_tags) > 60:
+            st.session_state.history_source_tags.pop(0)
+
+    # In Cloud Live Mode or Live Hardware Mode, show diagnostics panel at top
+    if is_cloud_mode:
+        cloud_receiver = get_cloud_receiver()
+        render_cloud_connection_panel(
+            status_info=cloud_receiver.get_status(),
+            current_backend_url=st.session_state.cloud_backend_url,
+            current_device_id=st.session_state.cloud_device_id,
+        )
+    elif is_live_mode:
+        receiver = get_serial_receiver()
+        render_hardware_connection_panel(
+            status_info=receiver.get_status(),
+            available_ports=SerialSensorReceiver.list_available_ports(),
+            current_port=st.session_state.serial_port,
+            current_baud=st.session_state.serial_baud_rate,
+        )
 
     # 1. Top Status Bar
     render_status_bar(
@@ -202,12 +519,16 @@ def render_live_telemetry_grid():
         warning_count=telemetry["warning_count"],
         safe_count=telemetry["safe_count"],
         total_count=telemetry["total_count"],
-        updated_seconds_ago=random.randint(1, 2),
+        updated_seconds_ago=1 if (is_live_mode or is_cloud_mode) else random.randint(1, 2),
+        data_source=data_source_tag,
+        device_id=telemetry.get("device_id"),
+        is_stale=False,
+        connection_status="connected",
+        uncalibrated_count=telemetry.get("uncalibrated_count", 0),
     )
 
-    # 2. Grid of 5 Parameter Tiles + 1 Recommended Action (3 per row)
-    # Row 1: Temperature, Humidity, Dust
-    r1_col1, r1_col2, r1_col3 = st.columns(3)
+    # 2. Grid of 4 Parameter Tiles (2x2) + 1 Recommended Action below
+    r1_col1, r1_col2 = st.columns(2)
     with r1_col1:
         render_parameter_card(
             readings["temperature"],
@@ -218,14 +539,8 @@ def render_live_telemetry_grid():
             readings["humidity"],
             st.session_state.telemetry_history["humidity"],
         )
-    with r1_col3:
-        render_parameter_card(
-            readings["dust"],
-            st.session_state.telemetry_history["dust"],
-        )
 
-    # Row 2: Noise, Gas, Recommended action
-    r2_col1, r2_col2, r2_col3 = st.columns(3)
+    r2_col1, r2_col2 = st.columns(2)
     with r2_col1:
         render_parameter_card(
             readings["noise"],
@@ -236,8 +551,9 @@ def render_live_telemetry_grid():
             readings["gas"],
             st.session_state.telemetry_history["gas"],
         )
-    with r2_col3:
-        render_recommended_action_card(telemetry["recommended_action"])
+
+    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+    render_recommended_action_card(telemetry["recommended_action"])
 
     # 3. Bottom Row: Sensor Nodes and Event Log
     b_col1, b_col2 = st.columns(2)
@@ -269,7 +585,7 @@ def render_cockpit_page():
         # Preset buttons
         st.markdown("**Scenario Presets:**")
         p_cols = st.columns(6)
-        preset_names = ["All Safe", "Dust & Noise", "Gas Leak Danger", "Heat Stress", "Multi-Hazard", "Reset"]
+        preset_names = ["All Safe", "Acoustic Noise Stress", "Gas Leak Danger", "Heat Stress", "Multi-Hazard", "Reset"]
 
         for idx, p_name in enumerate(preset_names):
             with p_cols[idx]:
@@ -280,7 +596,7 @@ def render_cockpit_page():
                     else:
                         preset_data = SCENARIOS[p_name]
                         overrides = {
-                            k: preset_data[k] for k in ["temperature", "humidity", "dust", "noise", "gas"]
+                            k: preset_data[k] for k in ["temperature", "humidity", "noise", "gas"]
                         }
                         sim.set_override(overrides)
                         st.session_state.feed_mode = "Manual Override"
@@ -288,7 +604,7 @@ def render_cockpit_page():
 
         st.markdown("---")
         st.markdown("**Manual Parameter Sliders:**")
-        s_cols = st.columns(5)
+        s_cols = st.columns(4)
         cur_vals = sim.current_values
 
         new_overrides = {}
@@ -299,12 +615,9 @@ def render_cockpit_page():
             h_val = st.slider("Humidity (%)", 0.0, 100.0, float(cur_vals["humidity"]), 1.0)
             new_overrides["humidity"] = h_val
         with s_cols[2]:
-            d_val = st.slider("Dust (µg/m³)", 0.0, 250.0, float(cur_vals["dust"]), 1.0)
-            new_overrides["dust"] = d_val
-        with s_cols[3]:
             n_val = st.slider("Noise (dB)", 40.0, 110.0, float(cur_vals["noise"]), 0.5)
             new_overrides["noise"] = n_val
-        with s_cols[4]:
+        with s_cols[3]:
             g_val = st.slider("Gas (ppm)", 0.0, 60.0, float(cur_vals["gas"]), 0.5)
             new_overrides["gas"] = g_val
 
@@ -355,10 +668,9 @@ def render_simulator_page():
         )
 
     # Parameter Selector for Live Stream Inspection
-    param_keys = ["gas", "dust", "temperature", "noise", "humidity"]
+    param_keys = ["gas", "temperature", "noise", "humidity"]
     param_labels = {
         "gas": "GAS-01 · Gas Concentration (ppm)",
-        "dust": "PM-03 · Dust PM10 (µg/m³)",
         "temperature": "DHT-02 · Temperature (°C)",
         "noise": "MIC-04 · Noise Level (dB)",
         "humidity": "DHT-02 · Relative Humidity (%)",
@@ -445,7 +757,7 @@ def render_simulator_page():
     st.markdown("---")
     st.markdown("**Inject Stress-Test Scenarios:**")
     sc_cols = st.columns(6)
-    sc_list = ["All Safe", "Dust & Noise", "Gas Leak Danger", "Heat Stress", "Multi-Hazard", "Reset"]
+    sc_list = ["All Safe", "Acoustic Noise Stress", "Gas Leak Danger", "Heat Stress", "Multi-Hazard", "Reset"]
     for idx, s_name in enumerate(sc_list):
         with sc_cols[idx]:
             if st.button(s_name, key=f"sim_sc_{idx}", use_container_width=True):
@@ -485,8 +797,10 @@ def render_history_reports_page():
 
     with bar_col2:
         st.markdown("**Select Parameter:**")
-        p_cols = st.columns(5)
-        param_options = ["Temperature", "Humidity", "Dust", "Noise", "Gas"]
+        p_cols = st.columns(4)
+        param_options = ["Temperature", "Humidity", "Noise", "Gas"]
+        if st.session_state.hist_param not in param_options:
+            st.session_state.hist_param = "Temperature"
         for j, popt in enumerate(param_options):
             with p_cols[j]:
                 is_selected = st.session_state.hist_param == popt
@@ -496,6 +810,12 @@ def render_history_reports_page():
                     st.rerun()
 
     st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+
+    if st.session_state.data_source_mode == "Cloud Live Mode (IoT Streaming)":
+        st.info(
+            f"🌐 **Cloud Telemetry Feed Active**: Displaying streaming and persisted historical records for "
+            f"device `{st.session_state.cloud_device_id}` from backend `{st.session_state.cloud_backend_url}`."
+        )
 
     sim = get_simulator()
     param_key = st.session_state.hist_param.lower()
@@ -587,7 +907,7 @@ def render_history_reports_page():
 
     # 3. Parameter Summary Table matching Image 2
     summary_rows = []
-    for k in ["temperature", "humidity", "dust", "noise", "gas"]:
+    for k in ["temperature", "humidity", "noise", "gas"]:
         s = sim.params_spec[k]
         vals = st.session_state.telemetry_history.get(k, [s["default"]])
         mn = min(vals) if vals else s["default"]
@@ -610,7 +930,18 @@ def render_history_reports_page():
     btn_col1, btn_col2, _ = st.columns([1.2, 1.4, 3])
     with btn_col1:
         # Download CSV
-        hist_df = pd.DataFrame(st.session_state.telemetry_history)
+        export_dict = dict(st.session_state.telemetry_history)
+        if "history_source_tags" in st.session_state:
+            export_dict["data_source"] = st.session_state.history_source_tags
+        hist_df = pd.DataFrame(export_dict)
+        col_rename = {
+            "temperature": "Temperature (°C)",
+            "humidity": "Humidity (%)",
+            "noise": "Noise (dB / Raw ADC)",
+            "gas": "Gas (ppm / Raw ADC)",
+            "data_source": "Data Source",
+        }
+        hist_df = hist_df.rename(columns={c: col_rename[c] for c in hist_df.columns if c in col_rename})
         csv_data = hist_df.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="Download CSV",

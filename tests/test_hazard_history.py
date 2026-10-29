@@ -57,7 +57,6 @@ class TestSnapshotRecording:
         readings = {
             "temperature": 24.5,
             "humidity": 48.0,
-            "dust": 32.0,
             "noise": 66.0,
             "gas": 9.0,
         }
@@ -68,7 +67,6 @@ class TestSnapshotRecording:
         df = tracker.get_snapshots_dataframe()
         assert len(df) == 1
         assert df["temperature"].iloc[0] == 24.5
-        assert df["dust"].iloc[0] == 32.0
         assert df["Tick"].iloc[0] == 1
 
     def test_rolling_buffer_capacity(self, tracker):
@@ -110,7 +108,6 @@ class TestEventLoggingAndDeduplication:
         readings = {
             "temperature": 24.0,
             "humidity": 45.0,
-            "dust": 28.0,
             "noise": 78.0,  # WARNING
             "gas": 65.0,    # DANGER
         }
@@ -132,7 +129,6 @@ class TestEventLoggingAndDeduplication:
         readings = {
             "temperature": 24.0,
             "humidity": 45.0,
-            "dust": 28.0,
             "noise": 80.0,  # WARNING
             "gas": 8.0,
         }
@@ -153,13 +149,13 @@ class TestEventLoggingAndDeduplication:
     def test_event_logs_on_status_escalation(self, tracker, simulator):
         """Escalation from WARNING to DANGER creates a new event row."""
         # 1. Noise enters WARNING (78 dB)
-        r1 = {"temperature": 24.0, "humidity": 45.0, "dust": 28.0, "noise": 78.0, "gas": 8.0}
+        r1 = {"temperature": 24.0, "humidity": 45.0, "noise": 78.0, "gas": 8.0}
         site_ass1 = HazardAssessmentEngine.assess_site(r1, simulator.parameters_meta)
         tracker.record_events_from_assessment(site_ass1, tick=1)
         assert tracker.event_count == 1
 
         # 2. Noise escalates to DANGER (92 dB)
-        r2 = {"temperature": 24.0, "humidity": 45.0, "dust": 28.0, "noise": 92.0, "gas": 8.0}
+        r2 = {"temperature": 24.0, "humidity": 45.0, "noise": 92.0, "gas": 8.0}
         site_ass2 = HazardAssessmentEngine.assess_site(r2, simulator.parameters_meta)
         ev2 = tracker.record_events_from_assessment(site_ass2, tick=2)
         assert len(ev2) == 1

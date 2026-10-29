@@ -199,21 +199,7 @@ BUILTIN_DEFAULT_CONFIG: Dict[str, Any] = {
                 "warning_max": 80.0,
             },
         },
-        "dust": {
-            "display_name": "Dust Concentration",
-            "unit": "µg/m³",
-            "description": "Respirable particulate matter (PM10 / silica dust concentration).",
-            "min_value": 0.0,
-            "max_value": 500.0,
-            "step": 1.0,
-            "default_value": 28.0,
-            "simulation_drift_max": 10.0,
-            "thresholds": {
-                "type": "upper",
-                "warning_threshold": 50.0,
-                "danger_threshold": 150.0,
-            },
-        },
+
         "noise": {
             "display_name": "Noise Level",
             "unit": "dB",
@@ -255,7 +241,7 @@ class EnvironmentalSimulator:
     and aggregates overall site safety state.
     """
 
-    REQUIRED_PARAMETERS = ["temperature", "humidity", "dust", "noise", "gas"]
+    REQUIRED_PARAMETERS = ["temperature", "humidity", "noise", "gas"]
 
     def __init__(
         self,
@@ -682,7 +668,7 @@ class EnvironmentalSimulator:
             # Occasional transient spike simulating heavy machinery operation or dust plume
             spike = 0.0
             if random.random() < 0.06:
-                spike_direction = 1 if key in ["dust", "noise", "gas"] else random.choice([-1, 1])
+                spike_direction = 1 if key in ["noise", "gas"] else random.choice([-1, 1])
                 spike = spike_direction * drift_max * 1.8
 
             new_val = curr_val + mean_reversion_pull + random_delta + spike

@@ -1,6 +1,6 @@
 {
   "_metadata": {
-    "version": "1.0.0",
+    "version": "1.1.0",
     "module": "environmental_hazard_simulator",
     "regulatory_disclaimer": "DISCLAIMER: SIMULATED DATA - NOT LIVE SENSOR READINGS. The simulation threshold values, parameter ranges, and hazard status boundaries configured herein represent demonstration defaults for simulation, testing, and educational purposes only. They do NOT constitute universal occupational exposure limits or statutory safety standards (such as OSHA, NIOSH, ACGIH, or ISO standards). In production deployments, thresholds must be calibrated and configured in accordance with applicable regional occupational health and safety regulations, specific site hazard assessments, and professional industrial hygiene guidance."
   },
@@ -8,6 +8,26 @@
     "default_mode": "manual",
     "update_interval_seconds": 2.0,
     "random_walk_enabled": true
+  },
+  "hardware_serial": {
+    "default_baud_rate": 115200,
+    "supported_baud_rates": [
+      9600,
+      19200,
+      38400,
+      57600,
+      115200,
+      230400
+    ],
+    "stale_timeout_seconds": 5.0,
+    "default_device_id": "safeedge-esp32-01",
+    "supported_fields": [
+      "device_id",
+      "temperature_c",
+      "humidity_pct",
+      "gas_raw",
+      "noise_raw"
+    ]
   },
   "parameters": {
     "temperature": {
@@ -42,21 +62,6 @@
         "safe_max": 60.0,
         "warning_min": 20.0,
         "warning_max": 80.0
-      }
-    },
-    "dust": {
-      "display_name": "Dust Concentration",
-      "unit": "µg/m³",
-      "description": "Respirable particulate matter (PM10 / silica dust concentration).",
-      "min_value": 0.0,
-      "max_value": 500.0,
-      "step": 1.0,
-      "default_value": 28.0,
-      "simulation_drift_max": 10.0,
-      "thresholds": {
-        "type": "upper",
-        "warning_threshold": 50.0,
-        "danger_threshold": 150.0
       }
     },
     "noise": {

@@ -57,25 +57,65 @@ def render_status_bar(
     safe_count: int,
     total_count: int,
     updated_seconds_ago: int = 2,
+    data_source: str = "simulation",
+    device_id: str = None,
+    is_stale: bool = False,
+    connection_status: str = "connected",
+    uncalibrated_count: int = 0,
 ):
     """
-    Renders top status bar:
-    Colored dot + Site status + counts + Hardware link + Updated time.
+    Renders top status bar with clear identification of:
+    - LIVE SENSOR DATA (ESP32) vs SIMULATED DATA
+    - Data freshness (fresh vs STALE / UNAVAILABLE)
+    - Uncalibrated raw sensor parameters count
     """
     bar_class = f"status-bar-{site_status.lower()}"
     dot_class = f"dot-{site_status.lower()}"
     status_label = f"Site status: {site_status.lower()}"
+
+    # Build counts summary
+    counts_parts = []
+    if danger_count > 0:
+        counts_parts.append(f"{danger_count} critical")
+    if warning_count > 0:
+        counts_parts.append(f"{warning_count} warnings")
+    counts_parts.append(f"{safe_count} of {total_count} parameters safe")
+    if uncalibrated_count > 0:
+        counts_parts.append(f"{uncalibrated_count} uncalibrated raw")
+    counts_str = ", ".join(counts_parts)
+
+    # Source Tag
+    if data_source == "live_esp32":
+        if is_stale:
+            source_badge = '<span style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.72rem; letter-spacing: 0.04em;">SENSOR DATA STALE</span>'
+        else:
+            source_badge = '<span style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.72rem; letter-spacing: 0.04em;">LIVE SENSOR DATA</span>'
+        dev_tag = f"ESP32 [{device_id or 'safeedge-01'}]"
+        conn_label = f'{ICONS["link"]} USB Serial: {connection_status} ({dev_tag})'
+    elif data_source == "cloud_esp32":
+        if is_stale:
+            source_badge = '<span style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.72rem; letter-spacing: 0.04em;">CLOUD DATA STALE</span>'
+        else:
+            source_badge = '<span style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #a855f7; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.72rem; letter-spacing: 0.04em;">CLOUD IOT STREAM</span>'
+        dev_tag = f"ESP32 [{device_id or 'safeedge-01'}]"
+        conn_label = f'{ICONS["link"]} Cloud IoT Link: {connection_status} ({dev_tag})'
+    else:
+        source_badge = '<span style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid #3b82f6; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.72rem; letter-spacing: 0.04em;">SIMULATED DATA</span>'
+        conn_label = f'{ICONS["link"]} Simulation Hardware Loop'
+
+    time_label = f"Updated {updated_seconds_ago}s ago" if updated_seconds_ago is not None else "Awaiting telemetry"
 
     html = (
         f'<div class="status-bar-container {bar_class}">'
         f'<div class="status-left">'
         f'<span class="status-dot {dot_class}"></span>'
         f'<span class="status-title">{status_label}</span>'
-        f'<span class="status-counts">{danger_count} critical, {warning_count} warnings, {safe_count} of {total_count} parameters safe</span>'
+        f'{source_badge}'
+        f'<span class="status-counts">{counts_str}</span>'
         f'</div>'
         f'<div class="status-right">'
-        f'<span class="status-hardware-link">{ICONS["link"]} Hardware link: connected</span>'
-        f'<span>Updated {updated_seconds_ago}s ago</span>'
+        f'<span class="status-hardware-link">{conn_label}</span>'
+        f'<span>{time_label}</span>'
         f'</div>'
         f'</div>'
     )
@@ -86,57 +126,79 @@ def render_parameter_card(param: Dict[str, Any], history: List[float]):
     """
     Renders a single parameter tile:
     - Icon + Name
-    - SAFE / WARNING / DANGER label
+    - SAFE / WARNING / DANGER / UNCALIBRATED label
     - Large value with unit
-    - Horizontal threshold meter with position pin
-    - Integrated inline SVG sparkline (fully inside the card)
-    - Sensor Node footer caption
+    - Horizontal threshold meter or uncalibrated raw indicator
+    - Detailed sub-metrics (e.g. PM1.0, PM2.5, PM10)
+    - Integrated inline SVG sparkline
+    - Sensor Node footer caption and calibration warnings
     """
-    val = param["value"]
-    unit = param["unit"]
-    min_v = param["min"]
-    max_v = param["max"]
-    warn_v = param["warn"]
-    danger_v = param["danger"]
-    status = param["status"]
-    icon_svg = ICONS.get(param["icon"], ICONS["thermometer"])
+    val = param.get("value")
+    unit = param.get("unit", "")
+    min_v = param.get("min", 0.0)
+    max_v = param.get("max", 100.0)
+    warn_v = param.get("warn", 50.0)
+    danger_v = param.get("danger", 80.0)
+    status = str(param.get("status", "SAFE")).upper()
+    is_uncal = bool(param.get("is_uncalibrated", False))
+    icon_svg = ICONS.get(param.get("icon", "thermometer"), ICONS["thermometer"])
+    sub_metrics = param.get("sub_metrics")
 
-    card_class = f"param-card param-card-{status.lower()}"
-    badge_class = f"param-badge badge-{status.lower()}"
+    # Styling classes
+    if val is None or status == "OFFLINE":
+        card_class = "param-card"
+        badge_html = '<span style="background: rgba(107, 114, 128, 0.2); color: #9ca3af; border: 1px solid #6b7280; padding: 2px 6px; border-radius: 4px; font-size: 0.72rem; font-weight: 700;">OFFLINE</span>'
+        val_display = "--"
+        meter_gradient = "linear-gradient(to right, #374151 0%, #374151 100%)"
+        val_pct = 0.0
+        labels_html = "<span>Sensor offline</span><span>No signal</span>"
+        footer_caption = f"{param.get('node', 'NODE')} · SENSOR DISCONNECTED"
+    elif is_uncal or status == "UNCALIBRATED":
+        card_class = "param-card param-card-warning"
+        badge_html = '<span style="background: rgba(245, 158, 11, 0.2); color: #fab219; border: 1px solid #f59e0b; padding: 2px 6px; border-radius: 4px; font-size: 0.72rem; font-weight: 700;">RAW UNCALIBRATED</span>'
+        val_display = f"{int(val):,}" if isinstance(val, (int, float)) else str(val)
+        meter_gradient = "linear-gradient(to right, #374151 0%, #4b5563 50%, #f59e0b 100%)"
+        val_pct = min(100.0, max(0.0, (val / 4095.0) * 100.0)) if max_v > 0 else 50.0
+        labels_html = "<span>0 ADC</span><span style='color: #f59e0b;'>No ppm/dB calibration</span><span>4095 ADC</span>"
+        footer_caption = f"{param.get('node', 'NODE')} · RAW UNCALIBRATED SENSOR DATA · Not classified as safe"
+    else:
+        card_class = f"param-card param-card-{status.lower()}"
+        badge_class = f"param-badge badge-{status.lower()}"
+        badge_html = f'<span class="{badge_class}">{status}</span>'
+        val_display = f"{val:.1f}" if isinstance(val, (int, float)) else str(val)
 
-    # Calculate meter percentages
-    span = max(0.1, max_v - min_v)
-    val_pct = max(0.0, min(100.0, ((val - min_v) / span) * 100.0))
-    warn_pct = max(0.0, min(100.0, ((warn_v - min_v) / span) * 100.0))
-    danger_pct = max(0.0, min(100.0, ((danger_v - min_v) / span) * 100.0))
+        span = max(0.1, max_v - min_v)
+        val_pct = max(0.0, min(100.0, ((val - min_v) / span) * 100.0))
+        warn_pct = max(0.0, min(100.0, ((warn_v - min_v) / span) * 100.0))
+        danger_pct = max(0.0, min(100.0, ((danger_v - min_v) / span) * 100.0))
 
-    # Threshold meter gradient: green up to warn, amber up to danger, red beyond
-    meter_gradient = (
-        f"linear-gradient(to right, #0ca30c 0%, #0ca30c {warn_pct:.1f}%, "
-        f"#fab219 {warn_pct:.1f}%, #fab219 {danger_pct:.1f}%, "
-        f"#d03b3b {danger_pct:.1f}%, #d03b3b 100%)"
-    )
+        meter_gradient = (
+            f"linear-gradient(to right, #0ca30c 0%, #0ca30c {warn_pct:.1f}%, "
+            f"#fab219 {warn_pct:.1f}%, #fab219 {danger_pct:.1f}%, "
+            f"#d03b3b {danger_pct:.1f}%, #d03b3b 100%)"
+        )
+        labels_html = f"<span>{min_v:g}</span><span>warn {warn_v:g}</span><span>danger {danger_v:g}</span>"
+        footer_caption = f"{param.get('node', 'NODE')} · last {len(history)} readings"
 
-    labels_html = (
-        f"<span>{min_v:g}</span>"
-        f"<span>warn {warn_v:g}</span>"
-        f"<span>danger {danger_v:g}</span>"
-    )
+    # Sub-metrics display (e.g., PMS5003 showing PM1.0, PM2.5, PM10)
+    sub_metrics_html = ""
+    if sub_metrics:
+        sub_metrics_html = f'<div style="font-size: 0.75rem; color: #93c5fd; margin-top: -6px; margin-bottom: 8px;">{sub_metrics}</div>'
 
-    # Generate the SVG sparkline directly inside the card HTML
-    sparkline_svg = make_svg_sparkline(history, width=300, height=42)
+    sparkline_svg = make_svg_sparkline(history, width=300, height=40)
 
     tile_html = (
         f'<div class="{card_class}">'
         f'<div>'
         f'<div class="param-header">'
-        f'<div class="param-title-wrap">{icon_svg}<span>{param["name"]}</span></div>'
-        f'<span class="{badge_class}">{status}</span>'
+        f'<div class="param-title-wrap">{icon_svg}<span>{param.get("name", "Parameter")}</span></div>'
+        f'{badge_html}'
         f'</div>'
         f'<div class="param-value-row">'
-        f'<span class="param-value-num">{val:.1f}</span>'
+        f'<span class="param-value-num">{val_display}</span>'
         f'<span class="param-value-unit">{unit}</span>'
         f'</div>'
+        f'{sub_metrics_html}'
         f'<div class="meter-wrapper">'
         f'<div class="meter-track-base" style="background: {meter_gradient};">'
         f'<div class="meter-pin" style="left: {val_pct:.1f}%;"></div>'
@@ -146,7 +208,7 @@ def render_parameter_card(param: Dict[str, Any], history: List[float]):
         f'</div>'
         f'<div>'
         f'{sparkline_svg}'
-        f'<div class="card-subcaption">{param["node"]} · last {len(history)} readings</div>'
+        f'<div class="card-subcaption">{footer_caption}</div>'
         f'</div>'
         f'</div>'
     )
@@ -270,7 +332,6 @@ def render_alert_thresholds_table():
         ("Gas (ppm)", "below 25", "25 to 50", "above 50"),
         ("Temperature (°C)", "below 35", "35 to 45", "above 45"),
         ("Humidity (%)", "below 70", "70 to 85", "above 85"),
-        ("Dust PM10 (µg/m³)", "below 100", "100 to 200", "above 200"),
         ("Noise (dB)", "below 85", "85 to 100", "above 100"),
     ]
 
@@ -477,3 +538,132 @@ def render_parameter_summary_table(summary_rows: List[Dict[str, Any]], time_wind
         f'</div>'
     )
     st.markdown(html, unsafe_allow_html=True)
+
+
+def render_hardware_connection_panel(
+    status_info: Dict[str, Any],
+    available_ports: List[Dict[str, str]],
+    current_port: str,
+    current_baud: int,
+    on_connect_cb=None,
+    on_disconnect_cb=None,
+):
+    """
+    Renders connection controls for Live Hardware Mode:
+    - Serial Port selection & Refresh
+    - Baud Rate configuration
+    - Connect / Disconnect button
+    - Real-time diagnostic telemetry pill
+    """
+    is_connected = status_info.get("is_connected", False)
+    is_stale = status_info.get("is_stale", False)
+    status_str = status_info.get("status", "DISCONNECTED")
+    last_msg_time = status_info.get("last_message_time")
+    last_age = status_info.get("last_message_age_seconds")
+    msgs_rec = status_info.get("messages_received", 0)
+    errs_cnt = status_info.get("errors_count", 0)
+    device_id = status_info.get("device_id")
+
+    # Connection Status Banner
+    if is_connected and not is_stale:
+        banner_bg = "rgba(16, 185, 129, 0.12)"
+        banner_border = "#10b981"
+        banner_icon = "●"
+        banner_color = "#10b981"
+        status_text = f"ESP32 Connected ({status_info.get('port')}) · Device: {device_id or 'safeedge-esp32'} · Streaming {msgs_rec} pkts"
+    elif is_connected and is_stale:
+        banner_bg = "rgba(245, 158, 11, 0.12)"
+        banner_border = "#f59e0b"
+        banner_icon = "▲"
+        banner_color = "#fab219"
+        status_text = f"ESP32 Connected but DATA STALE (>5s without packet) · Port: {status_info.get('port')} · Age: {last_age}s"
+    elif status_str == "ERROR":
+        banner_bg = "rgba(239, 68, 68, 0.12)"
+        banner_border = "#ef4444"
+        banner_icon = "✕"
+        banner_color = "#ef4444"
+        status_text = f"Serial Port Error: {status_info.get('last_error') or 'Communication failure'}"
+    else:
+        banner_bg = "rgba(75, 85, 99, 0.15)"
+        banner_border = "#4b5563"
+        banner_icon = "○"
+        banner_color = "#9ca3af"
+        status_text = "Serial Link: Disconnected. Select an active ESP32 COM port and click Connect."
+
+    st.markdown(
+        f"""
+        <div style="background-color: {banner_bg}; border: 1px solid {banner_border}; border-radius: 8px; padding: 12px 16px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="color: {banner_color}; font-size: 1.1rem; line-height: 0;">{banner_icon}</span>
+                <span style="font-weight: 600; font-size: 0.92rem; color: #f9fafb;">{status_text}</span>
+            </div>
+            <div style="font-size: 0.82rem; color: #9ca3af;">
+                Last message: <strong style="color: #e5e7eb;">{last_msg_time or 'None'}</strong> | Errors: <strong style="color: {'#ef4444' if errs_cnt > 0 else '#9ca3af'};">{errs_cnt}</strong>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_cloud_connection_panel(
+    status_info: Dict[str, Any],
+    current_backend_url: str,
+    current_device_id: str,
+):
+    """
+    Renders connection status and telemetry metrics for Cloud Live Mode (IoT Streaming):
+    - Cloud Backend URL and target Device ID
+    - Ingestion endpoint health and stale telemetry indicator
+    - Real-time diagnostic statistics (packets received, latency, error counter)
+    """
+    is_connected = status_info.get("is_connected", False)
+    is_stale = status_info.get("is_stale", False)
+    status_str = status_info.get("status", "DISCONNECTED")
+    last_msg_time = status_info.get("last_message_time")
+    last_age = status_info.get("last_message_age_seconds")
+    msgs_rec = status_info.get("messages_received", 0)
+    errs_cnt = status_info.get("errors_count", 0)
+    latency_ms = status_info.get("last_poll_duration_ms", 0)
+    device_id = status_info.get("device_id") or current_device_id
+
+    # Banner styling
+    if is_connected and not is_stale:
+        banner_bg = "rgba(168, 85, 247, 0.12)"
+        banner_border = "#a855f7"
+        banner_icon = "●"
+        banner_color = "#c084fc"
+        status_text = f"Cloud IoT Streaming Online · Device: {device_id} · Streamed {msgs_rec} pkts ({latency_ms}ms)"
+    elif is_connected and is_stale:
+        banner_bg = "rgba(245, 158, 11, 0.12)"
+        banner_border = "#f59e0b"
+        banner_icon = "▲"
+        banner_color = "#fab219"
+        status_text = f"Cloud Telemetry STALE (>{last_age}s since last packet) · Target: {device_id}"
+    elif status_str == "ERROR":
+        banner_bg = "rgba(239, 68, 68, 0.12)"
+        banner_border = "#ef4444"
+        banner_icon = "✕"
+        banner_color = "#ef4444"
+        status_text = f"Cloud Ingestion Error: {status_info.get('last_error') or 'Cannot reach backend service'}"
+    else:
+        banner_bg = "rgba(75, 85, 99, 0.15)"
+        banner_border = "#4b5563"
+        banner_icon = "○"
+        banner_color = "#9ca3af"
+        status_text = f"Cloud IoT Polling: {current_backend_url} · Awaiting first packet from {device_id}"
+
+    st.markdown(
+        f"""
+        <div style="background-color: {banner_bg}; border: 1px solid {banner_border}; border-radius: 8px; padding: 12px 16px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="color: {banner_color}; font-size: 1.1rem; line-height: 0;">{banner_icon}</span>
+                <span style="font-weight: 600; font-size: 0.92rem; color: #f9fafb;">{status_text}</span>
+            </div>
+            <div style="font-size: 0.82rem; color: #9ca3af;">
+                Backend: <strong style="color: #e5e7eb;">{current_backend_url}</strong> | Last: <strong style="color: #e5e7eb;">{last_msg_time or 'None'}</strong> | Errors: <strong style="color: {'#ef4444' if errs_cnt > 0 else '#9ca3af'};">{errs_cnt}</strong>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )

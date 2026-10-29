@@ -417,7 +417,7 @@ def render_active_hazard_prioritized_list(site_ass: SiteHazardAssessment):
     """
     if not site_ass.has_hazards:
         st.success(
-            "All 5 Environmental Parameters Within Safe Limits: "
+            "All Environmental Parameters Within Safe Limits: "
             "No active safety interventions required. Maintain routine site vigilance."
         )
         return
@@ -425,8 +425,7 @@ def render_active_hazard_prioritized_list(site_ass: SiteHazardAssessment):
     icons = {
         "temperature": "",
         "humidity": "",
-        "dust": "",
-        "noise": "",
+                "noise": "",
         "gas": "",
     }
 
@@ -487,8 +486,7 @@ def render_hazard_card_v3(assessment: HazardAssessment, meta: Dict[str, Any]):
     icons = {
         "temperature": "",
         "humidity": "",
-        "dust": "",
-        "noise": "",
+                "noise": "",
         "gas": "",
     }
     icon = icons.get(assessment.parameter_key, "")
@@ -552,8 +550,8 @@ def render_history_section(sim: EnvironmentalSimulator):
         st.caption("Categorized multi-axis time-series trends across distinct engineering unit domains:")
         chart_tab1, chart_tab2, chart_tab3 = st.tabs([
             " Microclimate (°C & %)",
-            " Particulate & Acoustic (Dust & Noise)",
-            " Gas Index (ppm)",
+            " Acoustic Noise (dB / ADC)",
+            " Gas Index (ppm / ADC)",
         ])
 
         with chart_tab1:
@@ -567,14 +565,8 @@ def render_history_section(sim: EnvironmentalSimulator):
                 st.line_chart(df_snaps.set_index("Timestamp")["humidity"], color="#3B82F6", use_container_width=True)
 
         with chart_tab2:
-            st.caption("Respirable Dust Concentration (µg/m³) and Acoustic Noise Level (dB):")
-            sub_col3, sub_col4 = st.columns(2)
-            with sub_col3:
-                st.markdown("**Dust Concentration (µg/m³ PM10)**")
-                st.line_chart(df_snaps.set_index("Timestamp")["dust"], color="#F59E0B", use_container_width=True)
-            with sub_col4:
-                st.markdown("**Noise Level (dB)**")
-                st.line_chart(df_snaps.set_index("Timestamp")["noise"], color="#8B5CF6", use_container_width=True)
+            st.caption("Acoustic Sound Pressure / Noise Level (dB / Raw ADC):")
+            st.line_chart(df_snaps.set_index("Timestamp")["noise"], color="#8B5CF6", use_container_width=True)
 
         with chart_tab3:
             st.caption("Hazardous Airborne Toxic / Combustible Gas Concentration Index (ppm):")

@@ -1,0 +1,69 @@
+version: "3.8"
+
+# =============================================================================
+# SafeEdge HazardGuard - Multi-Container Production / Local Stack
+# Orchestrates:
+# 1. postgres: Persistent PostgreSQL 15 database
+# 2. backend: FastAPI Cloud Telemetry Backend (Port 8000)
+# 3. dashboard: Streamlit Public Monitoring Cockpit (Port 8501)
+# =============================================================================
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: safeedge-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: safeedge_db
+      POSTGRES_USER: safeedge_user
+      POSTGRES_PASSWORD: safeedge_secure_password_2026
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U safeedge_user -d safeedge_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: safeedge-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://safeedge_user:safeedge_secure_password_2026@postgres:5432/safeedge_db
+      SAFEEDGE_API_KEY: safeedge-dev-api-key-2026
+      REQUIRE_API_KEY: "true"
+      STALE_TIMEOUT_SECONDS: "5.0"
+      CORS_ORIGINS: "http://localhost:8501,http://127.0.0.1:8501,https://*.streamlit.app"
+      MQTT_BROKER_HOST: broker.hivemq.com
+      MQTT_BROKER_PORT: "8883"
+      MQTT_USE_TLS: "true"
+      PORT: 8000
+    ports:
+      - "8000:8000"
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: safeedge-dashboard
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      SAFEEDGE_BACKEND_URL: http://backend:8000
+      SAFEEDGE_DEVICE_ID: safeedge-esp32-01
+      SAFEEDGE_API_KEY: safeedge-dev-api-key-2026
+    ports:
+      - "8501:8501"
+
+volumes:
+  postgres_data:
+

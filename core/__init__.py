@@ -23,6 +23,16 @@ from .hazard_history import (
     HazardEvent,
     HazardHistoryTracker,
 )
+from .serial_sensor_receiver import (
+    SerialSensorReceiver,
+    SerialConnectionStatus,
+    ESP32ParsedData,
+    get_serial_receiver,
+)
+from .cloud_sensor_receiver import (
+    CloudSensorReceiver,
+    get_cloud_receiver,
+)
 
 __all__ = [
     "EnvironmentalSimulator",
@@ -38,4 +48,10 @@ __all__ = [
     "render_environmental_dashboard",
     "render_simulator_view",
     "render_history_reports_view",
+    "SerialSensorReceiver",
+    "SerialConnectionStatus",
+    "ESP32ParsedData",
+    "get_serial_receiver",
+    "CloudSensorReceiver",
+    "get_cloud_receiver",
 ]
