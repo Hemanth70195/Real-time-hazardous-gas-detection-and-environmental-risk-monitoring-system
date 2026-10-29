@@ -1,0 +1,575 @@
+/* SafeEdge Industrial Monitoring Theme - Dark Slate */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+}
+
+/* Base application styling */
+.stApp {
+    background-color: #111827 !important;
+    color: #f9fafb !important;
+}
+
+/* Fix Streamlit Header - Non-overlapping and transparent */
+header[data-testid="stHeader"] {
+    background-color: transparent !important;
+    background: transparent !important;
+    color: #f9fafb !important;
+    border-bottom: none !important;
+    pointer-events: none !important;
+}
+
+header[data-testid="stHeader"] button,
+header[data-testid="stHeader"] svg,
+header[data-testid="stHeader"] [data-testid="stToolbar"] {
+    color: #9ca3af !important;
+    fill: #9ca3af !important;
+    pointer-events: auto !important;
+}
+
+/* Streamlit toolbar & decoration */
+[data-testid="stToolbar"] {
+    background-color: transparent !important;
+    color: #9ca3af !important;
+}
+
+[data-testid="stDecoration"] {
+    display: none !important;
+}
+
+[data-testid="stStatusWidget"] {
+    background-color: #1f2937 !important;
+    color: #9ca3af !important;
+}
+
+/* Sidebar styling */
+section[data-testid="stSidebar"] {
+    background-color: #0f172a !important;
+    border-right: 1px solid #1f2937 !important;
+}
+
+section[data-testid="stSidebar"] div,
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] span {
+    color: #e2e8f0 !important;
+}
+
+/* Ensure adequate top spacing so content is completely clear of header */
+.block-container {
+    padding-top: 4.5rem !important;
+    padding-bottom: 2.5rem !important;
+    max-width: 1350px !important;
+}
+
+/* Status Bar */
+.status-bar-container {
+    background-color: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    padding: 10px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.status-bar-normal {
+    border-color: #374151;
+}
+
+.status-bar-warning {
+    border-color: #fab219;
+}
+
+.status-bar-critical {
+    border-color: #d03b3b;
+    background-color: #26161a;
+}
+
+.status-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.dot-normal {
+    background-color: #0ca30c;
+}
+
+.dot-warning {
+    background-color: #fab219;
+    animation: gentle-blink-warn 1.4s infinite ease-in-out;
+}
+
+.dot-critical {
+    background-color: #d03b3b;
+    animation: gentle-blink-danger 1s infinite ease-in-out;
+}
+
+@keyframes gentle-blink-warn {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.9); }
+}
+
+@keyframes gentle-blink-danger {
+    0%, 100% { opacity: 1; transform: scale(1.05); }
+    50% { opacity: 0.25; transform: scale(0.85); }
+}
+
+.status-title {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #f9fafb;
+    text-transform: capitalize;
+}
+
+.status-counts {
+    color: #9ca3af;
+    font-size: 0.88rem;
+    margin-left: 6px;
+}
+
+.status-right {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    font-size: 0.85rem;
+    color: #9ca3af;
+}
+
+.status-hardware-link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #d1d5db;
+}
+
+/* Parameter Grid Cards */
+.param-card {
+    background-color: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+    min-height: 255px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.param-card-normal {
+    border-color: #374151;
+}
+
+.param-card-warning {
+    border-color: #fab219 !important;
+}
+
+.param-card-critical,
+.param-card-danger {
+    border-color: #d03b3b !important;
+    background-color: #23181c;
+}
+
+.param-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.param-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #9ca3af;
+    font-size: 0.92rem;
+    font-weight: 500;
+}
+
+.param-badge {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+}
+
+.badge-safe {
+    color: #0ca30c;
+}
+
+.badge-warning {
+    color: #fab219;
+}
+
+.badge-danger {
+    color: #d03b3b;
+}
+
+.param-value-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin: 4px 0 10px 0;
+}
+
+.param-value-num {
+    font-size: 2.25rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: #f9fafb;
+    font-feature-settings: "tnum" 1;
+}
+
+.param-value-unit {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #9ca3af;
+}
+
+/* Meter Bar */
+.meter-wrapper {
+    margin: 6px 0 10px 0;
+}
+
+.meter-track-base {
+    position: relative;
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    background: #374151;
+}
+
+.meter-pin {
+    position: absolute;
+    top: -3px;
+    width: 3px;
+    height: 12px;
+    background-color: #ffffff;
+    border-radius: 1px;
+    transform: translateX(-50%);
+    box-shadow: 0 0 3px rgba(0,0,0,0.5);
+    z-index: 2;
+}
+
+.meter-labels-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.72rem;
+    color: #9ca3af;
+    margin-top: 4px;
+}
+
+.card-subcaption {
+    font-size: 0.76rem;
+    color: #9ca3af;
+    margin-top: 6px;
+}
+
+/* Recommended Action Tile */
+.rec-card-body {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    height: 100%;
+}
+
+.rec-headline {
+    font-size: 1.15rem;
+    font-weight: 600;
+    line-height: 1.4;
+    color: #f9fafb;
+    margin: 18px 0 24px 0;
+}
+
+.rec-headline-safe,
+.rec-headline-normal {
+    color: #f9fafb;
+}
+
+.rec-headline-warn,
+.rec-headline-warning {
+    color: #fab219;
+}
+
+.rec-headline-critical,
+.rec-headline-danger {
+    color: #ef4444;
+}
+
+.rec-guidelines {
+    border-top: 1px solid #374151;
+    padding-top: 12px;
+    font-size: 0.82rem;
+    color: #9ca3af;
+    line-height: 1.5;
+}
+
+/* Bottom Tables Card */
+.bottom-panel-card {
+    background-color: #1f2937 !important;
+    border: 1px solid #374151 !important;
+    border-radius: 8px !important;
+    padding: 16px 20px !important;
+    box-sizing: border-box !important;
+    margin-top: 10px !important;
+    min-height: 230px !important;
+}
+
+.bottom-panel-title {
+    font-size: 0.78rem !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.06em !important;
+    color: #9ca3af !important;
+    margin-bottom: 12px !important;
+}
+
+.industrial-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 0.86rem !important;
+    background-color: #1f2937 !important;
+}
+
+.industrial-table th {
+    text-align: left !important;
+    padding: 8px 10px !important;
+    font-size: 0.75rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    color: #9ca3af !important;
+    border-bottom: 1px solid #374151 !important;
+    background-color: #1f2937 !important;
+}
+
+.industrial-table td {
+    padding: 10px 10px !important;
+    color: #e5e7eb !important;
+    border-bottom: 1px solid #283344 !important;
+    background-color: #1f2937 !important;
+}
+
+.industrial-table tr:last-child td {
+    border-bottom: none !important;
+}
+
+.state-online {
+    color: #0ca30c !important;
+    font-weight: 600 !important;
+}
+
+.sev-normal {
+    color: #0ca30c !important;
+    font-weight: 600 !important;
+}
+
+.sev-warning {
+    color: #fab219 !important;
+    font-weight: 600 !important;
+}
+
+.sev-danger {
+    color: #d03b3b !important;
+    font-weight: 600 !important;
+}
+
+.sev-cleared {
+    color: #0ca30c !important;
+    font-weight: 600 !important;
+}
+
+/* Page Headers */
+.page-header-title {
+    font-size: 1.6rem !important;
+    font-weight: 700 !important;
+    color: #f9fafb !important;
+    letter-spacing: -0.02em !important;
+    margin-bottom: 2px !important;
+}
+
+.page-header-subtitle {
+    font-size: 0.90rem !important;
+    color: #9ca3af !important;
+    margin-bottom: 20px !important;
+}
+
+/* Protocol Page Action Cards (Image 1) */
+.protocol-card {
+    border-radius: 8px !important;
+    padding: 18px 20px !important;
+    min-height: 200px !important;
+    box-sizing: border-box !important;
+    margin-bottom: 16px !important;
+}
+
+.protocol-card-normal {
+    background-color: #0f2417 !important;
+    border: 1px solid #0ca30c !important;
+}
+
+.protocol-card-warning {
+    background-color: #2b210f !important;
+    border: 1px solid #fab219 !important;
+}
+
+.protocol-card-danger {
+    background-color: #2e1217 !important;
+    border: 1px solid #d03b3b !important;
+}
+
+.protocol-card-title {
+    font-size: 1.1rem !important;
+    font-weight: 700 !important;
+    margin-bottom: 12px !important;
+}
+
+.protocol-title-normal {
+    color: #0ca30c !important;
+}
+
+.protocol-title-warning {
+    color: #fab219 !important;
+}
+
+.protocol-title-danger {
+    color: #ef4444 !important;
+}
+
+.protocol-list {
+    margin: 0 !important;
+    padding-left: 20px !important;
+    color: #f3f4f6 !important;
+    font-size: 0.90rem !important;
+    line-height: 1.7 !important;
+}
+
+.protocol-list li {
+    margin-bottom: 4px !important;
+}
+
+/* Alert Thresholds Table (Image 1) */
+.threshold-th-normal {
+    color: #0ca30c !important;
+}
+
+.threshold-th-warning {
+    color: #fab219 !important;
+}
+
+.threshold-th-danger {
+    color: #ef4444 !important;
+}
+
+/* Protective Equipment & Emergency Contacts Cards (Image 1) */
+.info-card {
+    background-color: #1f2937 !important;
+    border: 1px solid #374151 !important;
+    border-radius: 8px !important;
+    padding: 18px 20px !important;
+    min-height: 160px !important;
+}
+
+.info-card-title {
+    font-size: 0.78rem !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.06em !important;
+    color: #9ca3af !important;
+    margin-bottom: 12px !important;
+}
+
+.info-card-content {
+    color: #f3f4f6 !important;
+    font-size: 0.88rem !important;
+    line-height: 1.6 !important;
+}
+
+/* KPI Stat Cards (Image 2) */
+.kpi-card {
+    background-color: #1f2937 !important;
+    border: 1px solid #374151 !important;
+    border-radius: 8px !important;
+    padding: 14px 18px !important;
+    box-sizing: border-box !important;
+    margin-bottom: 16px !important;
+}
+
+.kpi-label {
+    font-size: 0.80rem !important;
+    color: #9ca3af !important;
+    font-weight: 500 !important;
+    margin-bottom: 4px !important;
+}
+
+.kpi-val {
+    font-size: 1.8rem !important;
+    font-weight: 700 !important;
+    color: #f9fafb !important;
+    line-height: 1.1 !important;
+    font-feature-settings: "tnum" 1 !important;
+}
+
+.kpi-val-amber {
+    font-size: 1.8rem !important;
+    font-weight: 700 !important;
+    color: #fab219 !important;
+    line-height: 1.1 !important;
+    font-feature-settings: "tnum" 1 !important;
+}
+
+/* Critical Hazard Alert Banner (Image 3) */
+.hazard-alert-banner {
+    background-color: #2b1216 !important;
+    border: 1px solid #d03b3b !important;
+    border-radius: 8px !important;
+    padding: 16px 20px !important;
+    margin-bottom: 20px !important;
+}
+
+.hazard-alert-title {
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+    color: #f87171 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    margin-bottom: 6px !important;
+}
+
+.hazard-alert-body {
+    font-size: 0.90rem !important;
+    color: #e5e7eb !important;
+    line-height: 1.5 !important;
+}
+
+/* Prevent markdown code formatting glitches */
+pre, code {
+    background-color: #1f2937 !important;
+    color: #e5e7eb !important;
+    border-color: #374151 !important;
+}
+
+/* Streamlit button styling in dark theme */
+div[data-testid="stButton"] button {
+    background-color: #2d3748 !important;
+    color: #f9fafb !important;
+    border: 1px solid #4a5568 !important;
+    border-radius: 6px !important;
+    font-size: 0.85rem !important;
+    font-weight: 500 !important;
+    transition: all 0.15s ease-in-out !important;
+}
+
+div[data-testid="stButton"] button:hover {
+    background-color: #3b475a !important;
+    border-color: #718096 !important;
+}
